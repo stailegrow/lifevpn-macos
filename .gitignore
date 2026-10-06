@@ -1,0 +1,47 @@
+.build/
+.swiftpm/
+dist/
+build/
+Resources/AppIcon.icns
+*.app/
+.DS_Store
+
+# Бандленные бинарники ядра — качаются скриптами, в репозитории им не место
+Sources/MaxStrike/Resources/xray
+Sources/MaxStrike/Resources/tun2socks
+Sources/MaxStrike/Resources/geoip.dat
+Sources/MaxStrike/Resources/geosite.dat
+Sources/MaxStrike/Resources/Fonts/*.ttf
+Sources/MaxStrike/Resources/Fonts/*OFL.txt
+
+# Реальные ссылки с боевыми ключами — только локально
+Fixtures/local-links.txt
+*.local.txt
+
+# Рабочие заметки по проекту — не для репозитория
+PLAN.md
+
+# Файлы, которые ассистент кладёт рядом с проектом
+Claude outputs/
+
+# Ядро Xray качает Scripts/fetch-xray.sh — в репозитории ему не место
+Sources/LifeVPN/Resources/xray
+
+# Старый прототип и рабочие копии — не для публичного репозитория
+_macos-prototype-unused/
+v3/
+*.zip
+
+# Локальный цикл сборки
+BuildAndRun.command
+BuildWatcher.command
+build_run.log
+.build_status
+.rebuild
+DemoScreens.command
+ShotWatcher.command
+.shot
+.shot_status
+.demoshot
+.demoshot_status
+docs/screenshots/test.png

@@ -1,0 +1,97 @@
+# Сборка и публикация релиза.
+#
+# Новая версия = поменять файл VERSION и отправить коммит. GitHub соберёт
+# universal-приложение (Apple Silicon + Intel), упакует его и выложит релиз
+# v<версия> с архивом — а установленные копии Life VPN подхватят его сами.
+name: Release
+
+on:
+  # На любой коммит в main: если релиз этой версии уже есть, сборка
+  # пропускается за пару секунд.
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Разовая чистка: включается файлом .github/PURGE_HISTORY. Заменяет
+      # историю main одним коммитом с текущим кодом (сам флажок в него не
+      # попадает), затем удаляет все прежние релизы, их метки и журналы
+      # сборок. Замена истории идёт первой: не пройдёт она — ничего не удалится.
+      - name: Чистая история (разово)
+        if: hashFiles('.github/PURGE_HISTORY') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "StaileGroW"
+          git config user.email "arigabiproksa@gmail.com"
+          git rm -q .github/PURGE_HISTORY
+          git checkout -q --orphan clean
+          git commit -q -m "Life VPN $(tr -d '[:space:]' < VERSION)"
+          git push --force origin clean:main
+          gh release list --limit 200 --json tagName --jq '.[].tagName' | while read -r t; do
+            gh release delete "$t" --cleanup-tag --yes
+          done
+          { git ls-remote --tags origin | awk '{print $2}' | grep -v '\^{}' || true; } | sed 's#refs/tags/##' | while read -r t; do
+            git push origin ":refs/tags/$t"
+          done
+          gh run list --limit 200 --json databaseId --jq '.[].databaseId' | while read -r id; do
+            [ "$id" = "${{ github.run_id }}" ] || gh run delete "$id" || true
+          done
+
+      - name: Версия
+        id: v
+        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Релиз уже есть?
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Свежий Xcode
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          echo "Использую $XCODE"
+          sudo xcode-select -s "$XCODE"
+          swift --version
+
+      - name: Сборка
+        if: steps.check.outputs.exists == 'false'
+        env:
+          ARCH_FLAGS: --arch arm64 --arch x86_64
+        run: |
+          set -o pipefail
+          if ! Scripts/release.sh 2>&1 | tee build.log; then
+            # Логи Actions без входа в GitHub не видны — хвост лога уходит в
+            # аннотацию, она публичная.
+            TAIL="$(grep -E "error:|Error|ошибк|fatal" build.log | tail -25)"
+            [ -z "$TAIL" ] && TAIL="$(tail -40 build.log)"
+            echo "::error title=Сборка не прошла::$(printf '%s' "$TAIL" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          fi
+
+      - name: Публикация
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          gh release create "v$V" "dist/LifeVPN-$V.zip" \
+            --title "Life VPN $V" \
+            --notes-file Scripts/release-notes.md
