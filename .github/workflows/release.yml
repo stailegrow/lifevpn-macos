@@ -14,39 +14,12 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   release:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-
-      # Разовая чистка: включается файлом .github/PURGE_HISTORY. Заменяет
-      # историю main одним коммитом с текущим кодом (сам флажок в него не
-      # попадает), затем удаляет все прежние релизы, их метки и журналы
-      # сборок. Замена истории идёт первой: не пройдёт она — ничего не удалится.
-      - name: Чистая история (разово)
-        if: hashFiles('.github/PURGE_HISTORY') != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git config user.name "StaileGroW"
-          git config user.email "arigabiproksa@gmail.com"
-          git rm -q .github/PURGE_HISTORY
-          git checkout -q --orphan clean
-          git commit -q -m "Life VPN $(tr -d '[:space:]' < VERSION)"
-          git push --force origin clean:main
-          gh release list --limit 200 --json tagName --jq '.[].tagName' | while read -r t; do
-            gh release delete "$t" --cleanup-tag --yes
-          done
-          { git ls-remote --tags origin | awk '{print $2}' | grep -v '\^{}' || true; } | sed 's#refs/tags/##' | while read -r t; do
-            git push origin ":refs/tags/$t"
-          done
-          gh run list --limit 200 --json databaseId --jq '.[].databaseId' | while read -r id; do
-            [ "$id" = "${{ github.run_id }}" ] || gh run delete "$id" || true
-          done
 
       - name: Версия
         id: v
