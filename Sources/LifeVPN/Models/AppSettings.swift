@@ -68,7 +68,7 @@ final class AppSettings: ObservableObject {
             routing = payload.routing
         }
         isLoading = false
-        if needsObsidian { save() }
+        if needsLifeNight { save() }
 
         // Только когда объект собран целиком: до этого обращаться к
         // собственным свойствам нельзя.
