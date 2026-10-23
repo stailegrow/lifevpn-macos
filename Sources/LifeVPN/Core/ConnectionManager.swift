@@ -63,6 +63,7 @@ final class ConnectionManager: ObservableObject {
             activeServer = server
             connectedSince = Date().addingTimeInterval(-2_537)
             state = .connected
+            RoutingLog.shared.fillDemo()
             return
         }
         if state.isConnected || state.isBusy { await disconnect() }
@@ -85,10 +86,12 @@ final class ConnectionManager: ObservableObject {
                 httpPort: httpPort,
                 logLevel: "warning",
                 logPath: Paths.coreLog.path,
+                accessLogPath: Paths.accessLog.path,
                 routing: routing
             )
             let json = try XrayConfigBuilder.makeJSON(for: server, options: options)
             try json.write(to: Paths.generatedConfig, options: .atomic)
+            RoutingLog.shared.reset()
 
             try core.start(configPath: Paths.generatedConfig, logPath: Paths.coreLog)
 
@@ -112,6 +115,7 @@ final class ConnectionManager: ObservableObject {
             externalIP = ip
             connectedSince = Date()
             state = .connected
+            RoutingLog.shared.begin()
 
         } catch {
             await tearDown()
@@ -210,6 +214,7 @@ final class ConnectionManager: ObservableObject {
     // MARK: - Служебное
 
     private func tearDown() async {
+        RoutingLog.shared.end()
         if proxyApplied {
             SystemProxy.disable()
             proxyApplied = false
@@ -218,6 +223,7 @@ final class ConnectionManager: ObservableObject {
     }
 
     private func handleCoreCrash(code: Int32) {
+        RoutingLog.shared.end()
         guard state.isConnected || state.isBusy else { return }
         if proxyApplied {
             SystemProxy.disable()

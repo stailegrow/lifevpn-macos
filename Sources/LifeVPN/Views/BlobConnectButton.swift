@@ -1,22 +1,21 @@
 import SwiftUI
 
-/// Главный переключатель: органическое пятно с мягким ореолом, а под ним —
-/// состояние и имя узла. Никакой карточки и обводки вокруг: кнопка сидит
-/// прямо на живом фоне.
+/// Кнопка подключения из версии 2.2: органическое пятно с мягким ореолом,
+/// которое дышит, а при подключении вспыхивает искрами.
 ///
 /// Все «часы» анимации считаются от абсолютного времени с постоянным
 /// периодом и никогда не перезапускаются от смены состояния — иначе на
 /// каждом переключении картинка прыгала бы к началу цикла. От состояния
 /// зависит только амплитуда, и она переходит к новому значению плавно, за
 /// те же 0,38 секунды, что и в Android-версии.
-struct ConnectSlab: View {
+struct BlobConnectButton: View {
     @Environment(\.palette) private var palette
 
     let state: ConnectionState
-    let serverName: String?
-    let connectedSince: Date?
-    let externalIP: String?
     let isEnabled: Bool
+    /// Сторона холста. Само пятно — половина её: остальное занимает ореол,
+    /// которому нужно место, чтобы сойти на нет внутри холста.
+    var size: CGFloat = UI.s(250)
     let action: () -> Void
 
     @State private var previous: Amplitudes = .disconnected
@@ -27,60 +26,17 @@ struct ConnectSlab: View {
     private static let transition: Double = 0.38
     private static let sparkleDuration: Double = 0.7
 
-    /// Поле больше самой кнопки: свечение должно успеть сойти на нет
-    /// внутри холста. Когда оно упиралось в край, на тёмной теме был
-    /// отчётливо виден квадрат — обрезанный краями холста градиент.
-    private var size: CGFloat { UI.s(250) }
-
     var body: some View {
-        VStack(spacing: 0) {
-            TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { timeline in
-                Canvas { context, canvasSize in
-                    draw(&context, size: canvasSize, now: timeline.date)
-                }
-                .frame(width: size, height: size)
-            }
-
-            Spacer().frame(height: UI.s(14))
-
-            Text(headline)
-                .font(Typography.hero(18))
-                .foregroundStyle(isFailed ? palette.bad : palette.textPrimary)
-
-            Text(caption)
-                .font(Typography.body(12.5))
-                .foregroundStyle(palette.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            if state.isConnected, connectedSince != nil || externalIP != nil {
-                Spacer().frame(height: UI.s(13))
-                HStack(spacing: UI.s(10)) {
-                    if let connectedSince {
-                        StatPill(label: L.t("время", "time")) {
-                            TimelineView(.periodic(from: .now, by: 1)) { clock in
-                                Text(Self.uptime(from: connectedSince, to: clock.date))
-                                    .font(Typography.code(12.5))
-                                    .monospacedDigit()
-                                    .foregroundStyle(palette.textPrimary)
-                            }
-                        }
-                    }
-                    if let externalIP {
-                        StatPill(label: "IP") {
-                            Text(externalIP)
-                                .font(Typography.code(12.5))
-                                .foregroundStyle(palette.textPrimary)
-                        }
-                    }
-                }
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { timeline in
+            Canvas { context, canvasSize in
+                draw(&context, size: canvasSize, now: timeline.date)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, UI.s(14))
-        .contentShape(Rectangle())
+        .frame(width: size, height: size)
+        .contentShape(Circle().inset(by: size * 0.24))
         .opacity(isEnabled ? 1 : 0.55)
         .onTapGesture { if isEnabled { action() } }
+        .help(state.isConnected ? L.t("Отключиться", "Disconnect") : L.t("Подключиться", "Connect"))
         .onAppear { target = Amplitudes.of(state); previous = target }
         .onChange(of: state) { _, new in
             let now = Date()
@@ -91,36 +47,8 @@ struct ConnectSlab: View {
         }
     }
 
-    // MARK: - Тексты
-
     private var isFailed: Bool { if case .failed = state { return true }; return false }
     private var isConnecting: Bool { state == .connecting }
-
-    private var headline: String {
-        switch state {
-        case .connected:    return L.t("Подключено", "Connected")
-        case .connecting:   return L.t("Подключение", "Connecting")
-        case .failed:       return L.t("Ошибка", "Error")
-        case .disconnected: return L.t("Не подключено", "Not connected")
-        }
-    }
-
-    private var caption: String {
-        switch state {
-        case .failed(let message):
-            return message
-        case .connecting:
-            return L.t("устанавливаем защищённый канал", "establishing a secure channel")
-        default:
-            return serverName ?? L.t("выберите узел", "pick a node")
-        }
-    }
-
-    private static func uptime(from start: Date, to now: Date) -> String {
-        let total = max(0, Int(now.timeIntervalSince(start)))
-        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
-    }
 
     // MARK: - Амплитуды
 
@@ -355,25 +283,5 @@ struct ConnectSlab: View {
 
     private func angle(_ time: TimeInterval, period: Double) -> Double {
         phase(time, period: period)
-    }
-}
-
-/// Мягкая пилюля со значением — тот же язык, что круглые кнопки в шапке:
-/// заливка без обводки.
-private struct StatPill<Value: View>: View {
-    @Environment(\.palette) private var palette
-    let label: String
-    @ViewBuilder var value: Value
-
-    var body: some View {
-        VStack(spacing: 1) {
-            value
-            Text(label)
-                .font(Typography.label(9))
-                .foregroundStyle(palette.textSecondary)
-        }
-        .padding(.horizontal, UI.s(15))
-        .padding(.vertical, UI.s(9))
-        .background(palette.hoverFill, in: CutRect(cut: UI.s(16)))
     }
 }

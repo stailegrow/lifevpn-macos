@@ -26,8 +26,8 @@
 
 ## Одна кнопка — и вы под защитой
 
-Нажали на знак питания — он загорается неоном, а рядом бегут время сессии и
-пинг до узла. Больше ничего делать не нужно: маршруты, DNS и системный прокси
+Нажали на живую кнопку — она вспыхивает искрами, а рядом бегут время сессии
+и пинг до узла. Больше ничего делать не нужно: маршруты, DNS и системный прокси
 Life VPN настраивает сам.
 
 <p align="center">
@@ -46,7 +46,7 @@ Life VPN настраивает сам.
     <td width="50%" valign="top">
       <img src="docs/screenshots/stats.png" alt="Статистика: скорость, трафик, история задержки">
       <h3>Статистика</h3>
-      Замер скорости в пару кликов, расход трафика и история задержки по каждому узлу.
+      Замер скорости, расход трафика, история задержки и журнал маршрутизации: видно, какой адрес ушёл в туннель, а какой напрямую.
     </td>
   </tr>
   <tr>
@@ -58,14 +58,15 @@ Life VPN настраивает сам.
     <td width="50%" valign="top">
       <img src="docs/screenshots/settings.png" alt="Настройки и темы">
       <h3>Настройки</h3>
-      Одиннадцать тем, живой фон, автоподключение при запуске, русский и английский.
+      Десять тем, живой фон, автоподключение при запуске, русский и английский.
     </td>
   </tr>
 </table>
 
 ## Ваш цвет
 
-Рубин, Аметист, Лагуна, Янтарь и ещё семь тем — тёмных и светлых.
+Чёрная Life night, оранжевая Life Panel, Аметист, Лагуна, Янтарь и пять
+светлых тем.
 Живой фон «северное сияние» переливается оттенками выбранной темы.
 
 <p align="center">
@@ -89,6 +90,8 @@ Life VPN настраивает сам.
 - задержка меряется напрямую от вашего Mac до узла — честная цифра, подключены вы или нет
 - фоновый опрос раз в десять секунд и мини-графики истории по каждому узлу
 - замер скорости по трём независимым источникам
+- журнал маршрутизации: каждое соединение с пометкой «туннель», «напрямую»
+  или «блок», выгрузка в .txt
 
 **Удобство**
 - значок в строке меню: зелёный, когда туннель поднят
@@ -146,7 +149,7 @@ Life VPN — проприетарный продукт, все права защ
 **Life VPN is a Mac VPN client you'll actually enjoy opening.** One button,
 fast nodes and a clean, focused interface.
 
-- **One-tap connect.** The power sign lights up in neon, and the session timer
+- **One-tap connect.** The living button flares up, and the session timer
   and latency appear beside it. Routing, DNS and the system proxy are handled
   for you.
 - **Nodes, statistics and routing** in a compact window with a collapsible
@@ -156,7 +159,9 @@ fast nodes and a clean, focused interface.
   automatically.
 - **Honest latency**, measured straight from your Mac to each node, with
   per-node history graphs and a speed test across three sources.
-- **Eleven themes** and a living aurora background.
+- **Routing log**: see which address went through the tunnel or direct, and
+  export it to .txt.
+- **Ten themes** and a living aurora background.
 - **Automatic updates**: new versions install with one click.
 
 **Install:** download the zip from the

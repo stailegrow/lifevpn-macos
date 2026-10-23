@@ -24,10 +24,12 @@ final class AppSettings: ObservableObject {
     }
 
     private struct Payload: Codable {
-        var paletteID = Palette.ruby.id
+        var paletteID = Palette.amoled.id
         /// Отметка, что тема «Обсидиана» уже выставлена один раз. Дальше
         /// выбор пользователя не трогаем.
         var obsidianApplied: Bool?
+        /// Тема «Life night» становится основной: включаем её один раз.
+        var lifeNightApplied: Bool?
         // Необязательное поле: старый файл настроек без языка должен
         // читаться, а не сбрасывать всё остальное к умолчаниям.
         var language: Lang?
@@ -45,10 +47,11 @@ final class AppSettings: ObservableObject {
         let payload = (try? Data(contentsOf: Paths.settings))
             .flatMap { try? JSONDecoder().decode(Payload.self, from: $0) } ?? Payload()
 
-        // Редизайн «Обсидиан» нарисован под тёмную тему с красным акцентом:
-        // при первом запуске новой версии переключаемся на неё один раз.
-        let needsObsidian = payload.obsidianApplied != true
-        paletteID = needsObsidian ? Palette.ruby.id : payload.paletteID
+        // Основная тема — чёрная «Life night»: при первом запуске версии,
+        // где она появилась, переключаемся на неё один раз. Убранные темы
+        // («Рубин», «Ночь») тоже превращаются в неё.
+        let needsLifeNight = payload.lifeNightApplied != true
+        paletteID = needsLifeNight ? Palette.amoled.id : Palette.named(payload.paletteID).id
         language = payload.language ?? .system
         socksPort = payload.socksPort
         httpPort = payload.httpPort
@@ -76,6 +79,7 @@ final class AppSettings: ObservableObject {
         guard !isLoading, !DemoMode.isOn else { return }
         let payload = Payload(paletteID: paletteID,
                               obsidianApplied: true,
+                              lifeNightApplied: true,
                               language: language,
                               socksPort: socksPort,
                               httpPort: httpPort,

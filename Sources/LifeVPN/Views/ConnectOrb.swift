@@ -160,12 +160,18 @@ struct HeroConnectCard: View {
 
     var body: some View {
         HStack(spacing: UI.s(18)) {
-            ConnectOrb(state: connection.state,
-                       isEnabled: store.selected != nil && !connection.state.isBusy,
-                       diameter: UI.s(128)) {
+            // Холст больше самого пятна: ореолу нужно место, чтобы сойти
+            // на нет. Отрицательные поля возвращают раскладке размер пятна,
+            // а прозрачный край свечения ложится на поля карточки.
+            BlobConnectButton(state: connection.state,
+                              isEnabled: store.selected != nil && !connection.state.isBusy,
+                              size: UI.s(196)) {
                 guard let server = store.selected else { return }
                 Task { await connection.toggle(server) }
             }
+            .padding(.vertical, -UI.s(12))
+            .padding(.leading, -UI.s(16))
+            .padding(.trailing, -UI.s(20))
 
             VStack(alignment: .leading, spacing: UI.s(12)) {
                 VStack(alignment: .leading, spacing: UI.s(3)) {

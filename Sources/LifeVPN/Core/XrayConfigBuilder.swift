@@ -12,11 +12,15 @@ enum XrayConfigBuilder {
         var httpPort: Int = 10809
         var logLevel: String = "warning"
         var logPath: String?
+        /// Журнал соединений: куда ушло каждое — туннель, напрямую, блок.
+        var accessLogPath: String?
         var routing: RoutingConfig = RoutingPreset.global.make()
 
         init(socksPort: Int = 10808, httpPort: Int = 10809,
              logLevel: String = "warning", logPath: String? = nil,
+             accessLogPath: String? = nil,
              routing: RoutingConfig = RoutingPreset.global.make()) {
+            self.accessLogPath = accessLogPath
             self.socksPort = socksPort
             self.httpPort = httpPort
             self.logLevel = logLevel
@@ -37,6 +41,10 @@ enum XrayConfigBuilder {
         var log: [String: Any] = ["loglevel": options.logLevel]
         if let path = options.logPath {
             log["error"] = path
+        }
+        if let access = options.accessLogPath {
+            log["access"] = access
+            log["dnsLog"] = false
         }
 
         var root: [String: Any] = [

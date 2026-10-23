@@ -5,7 +5,7 @@ import SwiftUI
 /// поэтому смена темы не требует правок в разметке.
 ///
 /// Life VPN: цвета приглушённые, пастельные — пять светлых тем, мягкая
-/// тёмная и настоящий чёрный AMOLED. Помимо ролей интерфейса палитра несёт
+/// тёмные и основная чёрная «Life night». Помимо ролей интерфейса палитра несёт
 /// три цвета пятен живого фона: фон переливается оттенками своей темы, и
 /// задавать их отдельно от палитры значило бы рассинхронизировать их при
 /// добавлении новой темы.
@@ -51,7 +51,7 @@ struct Palette: Identifiable, Hashable, Sendable {
     var accent: Color { accentStart }
 
     /// Цвет текста и значков поверх акцентной заливки. Пастельным акцентам
-    /// нужен тёмный текст, насыщенным (как у «Рубина») — белый: считаем по
+    /// нужен тёмный текст, насыщенным (как у «Life Panel») — белый: считаем по
     /// яркости, чтобы новой теме не приходилось об этом помнить.
     var onAccent: Color {
         let c = NSColor(accentStart).usingColorSpace(.sRGB) ?? .white
@@ -70,7 +70,10 @@ struct Palette: Identifiable, Hashable, Sendable {
     /// соседями, чтобы объём читался и на почти чёрном.
     var orbColors: (main: Color, second: Color, third: Color) {
         switch id {
-        case "ruby", "lagoon":
+        case "panel":
+            // Как у панели: только тёплое свечение, без холодных соседей.
+            return (accentStart, Color(hex: 0x9A3412), Color(hex: 0x7C2D12))
+        case "lagoon":
             return (accentStart, Color(hex: 0x5B47D6), Color(hex: 0x3BB8E6))
         case "amethyst", "amber":
             return (accentStart, Color(hex: 0xE5383B), Color(hex: 0x3BB8E6))
@@ -135,20 +138,11 @@ extension Palette {
         blob1: Color(hex: 0xF9DCE9), blob2: Color(hex: 0xF6D9DE), blob3: Color(hex: 0xF7E9C4),
         isDark: false)
 
-    /// Мягкая тёмная тема — не чернота, а тёплый приглушённый тёмно-синий
-    /// с теми же пастельными акцентами, чуть ярче для контраста.
-    static let night = Palette(
-        id: "night", nameRU: "Ночь", nameEN: "Night",
-        background: Color(hex: 0x1B2030), card: Color(hex: 0x262C40), cardBorder: Color(hex: 0xFFFFFF, alpha: 0.20),
-        accentStart: Color(hex: 0x8FB6EE), accentEnd: Color(hex: 0xB7A6EE), idleRing: Color(hex: 0xFFFFFF, alpha: 0.20),
-        textPrimary: Color(hex: 0xEDEFF6), textSecondary: Color(hex: 0x9BA1B8),
-        good: Color(hex: 0x7FD9B8), warn: Color(hex: 0xF0C283), bad: Color(hex: 0xF08FA0),
-        blob1: Color(hex: 0x2E3A57), blob2: Color(hex: 0x362F57), blob3: Color(hex: 0x20404A),
-        isDark: true)
-
-    /// Настоящий чёрный фон — под экраны, которым это экономит подсветку.
+    /// «Life night» — основная тема: настоящий чёрный фон с пастельным
+    /// акцентом. Идентификатор остался прежним, «amoled», чтобы сохранённые
+    /// настройки и чёрная кнопка в покое продолжали работать.
     static let amoled = Palette(
-        id: "amoled", nameRU: "AMOLED", nameEN: "AMOLED",
+        id: "amoled", nameRU: "Life night", nameEN: "Life night",
         background: Color(hex: 0x000000), card: Color(hex: 0x121214), cardBorder: Color(hex: 0xFFFFFF, alpha: 0.15),
         accentStart: Color(hex: 0x9AC2F2), accentEnd: Color(hex: 0xC2AEF7), idleRing: Color(hex: 0xFFFFFF, alpha: 0.20),
         textPrimary: Color(hex: 0xF5F6FA), textSecondary: Color(hex: 0x8C8F9C),
@@ -156,15 +150,15 @@ extension Palette {
         blob1: Color(hex: 0x121722), blob2: Color(hex: 0x17121F), blob3: Color(hex: 0x0F1A18),
         isDark: true)
 
-    /// Глубокий тёмный фон и насыщенный красный акцент — тема под
-    /// стеклянный редизайн со сворачиваемой боковой панелью.
-    static let ruby = Palette(
-        id: "ruby", nameRU: "Рубин", nameEN: "Ruby",
-        background: Color(hex: 0x0A0A0F), card: Color(hex: 0x1A1A22), cardBorder: Color(hex: 0xFFFFFF, alpha: 0.10),
-        accentStart: Color(hex: 0xE5383B), accentEnd: Color(hex: 0xFF5C61), idleRing: Color(hex: 0xFFFFFF, alpha: 0.20),
-        textPrimary: Color(hex: 0xF4F4F7), textSecondary: Color(hex: 0x8E8E9C),
-        good: Color(hex: 0x4ADE9A), warn: Color(hex: 0xF5B451), bad: Color(hex: 0xFF6B6B),
-        blob1: Color(hex: 0x5A1220), blob2: Color(hex: 0x23194A), blob3: Color(hex: 0x10283F),
+    /// «Life Panel» — в цветах панели управления серверами: тёплый
+    /// почти чёрный фон, коричневатые карточки и оранжевый акцент.
+    static let panel = Palette(
+        id: "panel", nameRU: "Life Panel", nameEN: "Life Panel",
+        background: Color(hex: 0x0C0A09), card: Color(hex: 0x1C1714), cardBorder: Color(hex: 0xFFFFFF, alpha: 0.08),
+        accentStart: Color(hex: 0xF97316), accentEnd: Color(hex: 0xFF9A4D), idleRing: Color(hex: 0xFFFFFF, alpha: 0.20),
+        textPrimary: Color(hex: 0xF5F1ED), textSecondary: Color(hex: 0x9C9087),
+        good: Color(hex: 0x3CCB7F), warn: Color(hex: 0xF5B451), bad: Color(hex: 0xFF6B6B),
+        blob1: Color(hex: 0x4A2310), blob2: Color(hex: 0x2E1608), blob3: Color(hex: 0x3A1C0C),
         isDark: true)
 
     static let amethyst = Palette(
@@ -194,13 +188,14 @@ extension Palette {
         blob1: Color(hex: 0x4A2C08), blob2: Color(hex: 0x5A1230), blob3: Color(hex: 0x10283F),
         isDark: true)
 
-    /// Сначала — тёмные темы «Обсидиана», под которые нарисован интерфейс;
-    /// прежние пастельные остаются для тех, кто к ним привык.
-    static let all: [Palette] = [.ruby, .amethyst, .lagoon, .amber, .night, .amoled,
+    /// Сначала — основная «Life night» и остальные тёмные; прежние
+    /// пастельные остаются для тех, кто к ним привык.
+    static let all: [Palette] = [.amoled, .panel, .amethyst, .lagoon, .amber,
                                  .sky, .mint, .lavender, .peach, .rose]
 
+    /// Неизвестная или убранная тема («Рубин», «Ночь») — это «Life night».
     static func named(_ id: String) -> Palette {
-        all.first { $0.id == id } ?? .ruby
+        all.first { $0.id == id } ?? .amoled
     }
 }
 
@@ -243,7 +238,7 @@ enum Metrics {
 // MARK: - Доступ из иерархии
 
 private struct PaletteKey: EnvironmentKey {
-    static let defaultValue: Palette = .ruby
+    static let defaultValue: Palette = .amoled
 }
 
 extension EnvironmentValues {

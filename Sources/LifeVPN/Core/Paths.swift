@@ -15,6 +15,7 @@ enum Paths {
 
     static var generatedConfig: URL { appSupport.appendingPathComponent("config.json") }
     static var coreLog: URL { appSupport.appendingPathComponent("xray.log") }
+    static var accessLog: URL { appSupport.appendingPathComponent("access.log") }
     static var servers: URL { appSupport.appendingPathComponent("servers.json") }
     static var settings: URL { appSupport.appendingPathComponent("settings.json") }
     static var geoDir: URL {
