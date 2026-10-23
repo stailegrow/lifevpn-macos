@@ -13,7 +13,7 @@
   <a href="https://github.com/stailegrow/lifevpn-macos/releases/latest"><img src="https://img.shields.io/github/v/release/stailegrow/lifevpn-macos?style=for-the-badge&label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F&color=e5383b" alt="Последняя версия"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-1a1a22?style=for-the-badge&logo=apple&logoColor=white" alt="macOS 14 и новее">
   <img src="https://img.shields.io/badge/Apple%20Silicon%20%2B%20Intel-1a1a22?style=for-the-badge" alt="Apple Silicon и Intel">
-  <img src="https://img.shields.io/badge/Xray--core-26.9-1a1a22?style=for-the-badge" alt="Ядро Xray-core 26.9">
+  <img src="https://img.shields.io/badge/Xray--core-26.10-1a1a22?style=for-the-badge" alt="Ядро Xray-core 26.10">
 </p>
 
 <p align="center">
