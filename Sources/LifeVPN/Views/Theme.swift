@@ -51,7 +51,7 @@ struct Palette: Identifiable, Hashable, Sendable {
     var accent: Color { accentStart }
 
     /// Цвет текста и значков поверх акцентной заливки. Пастельным акцентам
-    /// нужен тёмный текст, насыщенным (как у «Life Panel») — белый: считаем по
+    /// нужен тёмный текст, насыщенным (как у «Life») — белый: считаем по
     /// яркости, чтобы новой теме не приходилось об этом помнить.
     var onAccent: Color {
         let c = NSColor(accentStart).usingColorSpace(.sRGB) ?? .white
@@ -150,10 +150,10 @@ extension Palette {
         blob1: Color(hex: 0x121722), blob2: Color(hex: 0x17121F), blob3: Color(hex: 0x0F1A18),
         isDark: true)
 
-    /// «Life Panel» — в цветах панели управления серверами: тёплый
+    /// «Life» — в цветах панели управления серверами: тёплый
     /// почти чёрный фон, коричневатые карточки и оранжевый акцент.
     static let panel = Palette(
-        id: "panel", nameRU: "Life Panel", nameEN: "Life Panel",
+        id: "panel", nameRU: "Life", nameEN: "Life",
         background: Color(hex: 0x0C0A09), card: Color(hex: 0x1C1714), cardBorder: Color(hex: 0xFFFFFF, alpha: 0.08),
         accentStart: Color(hex: 0xF97316), accentEnd: Color(hex: 0xFF9A4D), idleRing: Color(hex: 0xFFFFFF, alpha: 0.20),
         textPrimary: Color(hex: 0xF5F1ED), textSecondary: Color(hex: 0x9C9087),
