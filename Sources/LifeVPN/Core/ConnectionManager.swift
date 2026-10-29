@@ -64,7 +64,7 @@ final class ConnectionManager: ObservableObject {
             connectedSince = Date().addingTimeInterval(-2_537)
             state = .connected
             RoutingLog.shared.fillDemo()
-            TrafficMeter.shared.fillDemo()
+            SessionTraffic.shared.fillDemo()
             return
         }
         if state.isConnected || state.isBusy { await disconnect() }
@@ -81,8 +81,8 @@ final class ConnectionManager: ObservableObject {
 
         let routing = await resolvedRouting()
 
-        let metricsPort = TrafficMeter.freePort()
-        TrafficMeter.shared.reset(port: metricsPort)
+        let metricsPort = SessionTraffic.freePort()
+        SessionTraffic.shared.reset(port: metricsPort)
 
         do {
             let options = XrayConfigBuilder.Options(
@@ -121,7 +121,7 @@ final class ConnectionManager: ObservableObject {
             connectedSince = Date()
             state = .connected
             RoutingLog.shared.begin()
-            TrafficMeter.shared.start()
+            SessionTraffic.shared.start()
 
         } catch {
             await tearDown()
@@ -221,7 +221,7 @@ final class ConnectionManager: ObservableObject {
 
     private func tearDown() async {
         RoutingLog.shared.end()
-        TrafficMeter.shared.stop()
+        SessionTraffic.shared.stop()
         if proxyApplied {
             SystemProxy.disable()
             proxyApplied = false
@@ -231,7 +231,7 @@ final class ConnectionManager: ObservableObject {
 
     private func handleCoreCrash(code: Int32) {
         RoutingLog.shared.end()
-        TrafficMeter.shared.stop()
+        SessionTraffic.shared.stop()
         guard state.isConnected || state.isBusy else { return }
         if proxyApplied {
             SystemProxy.disable()

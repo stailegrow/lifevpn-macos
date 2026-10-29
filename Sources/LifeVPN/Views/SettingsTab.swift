@@ -288,7 +288,7 @@ struct StatsTab: View {
     @Environment(\.palette) private var palette
     @EnvironmentObject private var store: ServerStore
     @EnvironmentObject private var connection: ConnectionManager
-    @ObservedObject private var meter = TrafficMeter.shared
+    @ObservedObject private var meter = SessionTraffic.shared
 
     private var totalUsed: Int64 {
         store.subscriptions.compactMap(\.usedBytes).reduce(0, +)

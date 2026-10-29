@@ -14,7 +14,7 @@ enum XrayConfigBuilder {
         var logPath: String?
         /// Журнал соединений: куда ушло каждое — туннель, напрямую, блок.
         var accessLogPath: String?
-        /// Порт эндпоинта счётчиков трафика (см. TrafficMeter).
+        /// Порт эндпоинта счётчиков трафика (см. SessionTraffic).
         var metricsPort: Int?
         var routing: RoutingConfig = RoutingPreset.global.make()
 

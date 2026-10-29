@@ -8,8 +8,8 @@ import Foundation
 /// Берём только outbound «proxy»: прямой трафик и заблокированное через VPN
 /// не ходят и в цифру не входят.
 @MainActor
-final class TrafficMeter: ObservableObject {
-    static let shared = TrafficMeter()
+final class SessionTraffic: ObservableObject {
+    static let shared = SessionTraffic()
 
     @Published private(set) var uplink: Int64 = 0
     @Published private(set) var downlink: Int64 = 0
