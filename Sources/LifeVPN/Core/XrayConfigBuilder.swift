@@ -14,13 +14,17 @@ enum XrayConfigBuilder {
         var logPath: String?
         /// Журнал соединений: куда ушло каждое — туннель, напрямую, блок.
         var accessLogPath: String?
+        /// Порт эндпоинта счётчиков трафика (см. TrafficMeter).
+        var metricsPort: Int?
         var routing: RoutingConfig = RoutingPreset.global.make()
 
         init(socksPort: Int = 10808, httpPort: Int = 10809,
              logLevel: String = "warning", logPath: String? = nil,
              accessLogPath: String? = nil,
+             metricsPort: Int? = nil,
              routing: RoutingConfig = RoutingPreset.global.make()) {
             self.accessLogPath = accessLogPath
+            self.metricsPort = metricsPort
             self.socksPort = socksPort
             self.httpPort = httpPort
             self.logLevel = logLevel
@@ -55,6 +59,11 @@ enum XrayConfigBuilder {
         ]
         if let dns = dns(options.routing) {
             root["dns"] = dns
+        }
+        if let port = options.metricsPort {
+            root["stats"] = [String: Any]()
+            root["policy"] = ["system": ["statsOutboundUplink": true, "statsOutboundDownlink": true]]
+            root["metrics"] = ["tag": "metrics", "listen": "127.0.0.1:\(port)"]
         }
         return root
     }

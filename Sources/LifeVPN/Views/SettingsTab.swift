@@ -287,6 +287,8 @@ struct SettingsTab: View {
 struct StatsTab: View {
     @Environment(\.palette) private var palette
     @EnvironmentObject private var store: ServerStore
+    @EnvironmentObject private var connection: ConnectionManager
+    @ObservedObject private var meter = TrafficMeter.shared
 
     private var totalUsed: Int64 {
         store.subscriptions.compactMap(\.usedBytes).reduce(0, +)
@@ -341,7 +343,21 @@ struct StatsTab: View {
 
     private var trafficCard: some View {
         Card(title: L.t("Трафик", "Traffic")) {
-            BigBytes(bytes: totalUsed, caption: L.t("всего", "total"))
+            if connection.state.isConnected {
+                // Пока туннель поднят — сколько прошло через него за эту
+                // сессию; ниже, как и раньше, расход по подпискам с панели.
+                BigBytes(bytes: meter.total, caption: L.t("за сессию", "this session"))
+                HStack(spacing: UI.s(12)) {
+                    Label(Subscription.formatBytes(meter.downlink), systemImage: "arrow.down")
+                    Label(Subscription.formatBytes(meter.uplink), systemImage: "arrow.up")
+                }
+                .font(Typography.code(10))
+                .foregroundStyle(palette.textSecondary)
+                .labelStyle(.titleAndIcon)
+                .lineLimit(1)
+            } else {
+                BigBytes(bytes: totalUsed, caption: L.t("всего", "total"))
+            }
             ForEach(store.subscriptions) { subscription in
                 HStack {
                     Text(subscription.displayName)
