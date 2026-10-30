@@ -43,6 +43,9 @@ final class ConnectionManager: ObservableObject {
 
     private let core = XrayProcess()
     private var proxyApplied = false
+    /// Текущая команда подключения/отключения и её поколение (см. enqueue).
+    private var operation: Task<Void, Never>?
+    private var generation = 0
 
     init() {
         core.onUnexpectedExit = { [weak self] code in
@@ -57,6 +60,41 @@ final class ConnectionManager: ObservableObject {
     // MARK: - Подключение
 
     func connect(to server: ProxyConfig) async {
+        await enqueue { [weak self] generation in
+            await self?.performConnect(to: server, generation: generation)
+        }
+    }
+
+    func disconnect() async {
+        await enqueue { [weak self] _ in
+            await self?.performDisconnect()
+        }
+    }
+
+    /// Подключения и отключения выполняются строго по очереди.
+    ///
+    /// Новая команда отменяет ту, что ещё идёт (её ожидания обрываются), и
+    /// ждёт, пока прежняя приберёт за собой. Номер поколения позволяет
+    /// прежней попытке после любого ожидания понять, что она устарела, и
+    /// выйти, не трогая состояние, которое уже принадлежит новой команде.
+    private func enqueue(_ work: @escaping @MainActor (Int) async -> Void) async {
+        generation += 1
+        let current = generation
+        let previous = operation
+        previous?.cancel()
+        let task = Task { @MainActor in
+            await previous?.value
+            await work(current)
+        }
+        operation = task
+        await task.value
+    }
+
+    private func isStale(_ generation: Int) -> Bool {
+        generation != self.generation || Task.isCancelled
+    }
+
+    private func performConnect(to server: ProxyConfig, generation: Int) async {
         if DemoMode.isOn {
             state = .connecting
             try? await Task.sleep(for: .seconds(1.2))
@@ -67,7 +105,10 @@ final class ConnectionManager: ObservableObject {
             SessionTraffic.shared.fillDemo()
             return
         }
-        if state.isConnected || state.isBusy { await disconnect() }
+        if state.isConnected || state.isBusy || proxyApplied || core.isRunning {
+            await performDisconnect()
+        }
+        guard !isStale(generation) else { return }
 
         socksPort = AppSettings.shared.socksPort
         httpPort = AppSettings.shared.httpPort
@@ -80,6 +121,7 @@ final class ConnectionManager: ObservableObject {
         speedError = nil
 
         let routing = await resolvedRouting()
+        guard !isStale(generation) else { return }
 
         let metricsPort = SessionTraffic.freePort()
         SessionTraffic.shared.reset(port: metricsPort)
@@ -103,17 +145,21 @@ final class ConnectionManager: ObservableObject {
             // Ядро с битым конфигом умирает почти мгновенно — ловим это здесь,
             // чтобы не успеть перевести систему на неработающий прокси.
             try await Task.sleep(for: .milliseconds(700))
+            if isStale(generation) { await tearDown(); return }
             guard core.isRunning else {
                 let log = XrayProcess.readLog(at: Paths.coreLog)
                 throw XrayProcess.Failure.exitedImmediately(code: 1, log: log)
             }
 
             let ip = await IPChecker.externalIP(viaHTTPProxyPort: httpPort)
+            if isStale(generation) { await tearDown(); return }
             guard let ip else {
                 let log = XrayProcess.readLog(at: Paths.coreLog)
                 throw Failure.noTunnel(log: log)
             }
 
+            // enable() сам откатывает частично применённые настройки, если
+            // одна из команд networksetup не прошла.
             try SystemProxy.enable(socksPort: socksPort, httpPort: httpPort)
             proxyApplied = true
 
@@ -125,12 +171,15 @@ final class ConnectionManager: ObservableObject {
 
         } catch {
             await tearDown()
+            // Отменённая попытка ошибкой не считается: её сменила новая
+            // команда, и состояние теперь задаёт она.
+            guard !isStale(generation) else { return }
             connectedSince = nil
             state = .failed(error.localizedDescription)
         }
     }
 
-    func disconnect() async {
+    private func performDisconnect() async {
         if DemoMode.isOn {
             state = .disconnected
             activeServer = nil

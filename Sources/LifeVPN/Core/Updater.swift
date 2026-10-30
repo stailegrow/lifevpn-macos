@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 
 /// Обновление из релизов GitHub.
@@ -26,6 +27,7 @@ final class Updater: ObservableObject {
         let notes: String
         let page: URL
         let archive: URL
+        let checksum: URL
         let size: Int64
     }
 
@@ -104,9 +106,16 @@ final class Updater: ObservableObject {
                 phase = .upToDate
                 return
             }
+            // Без контрольной суммы обновление не ставим: архив нечем сверить.
+            guard let sumAsset = payload.assets.first(where: { $0.name == asset.name + ".sha256" }),
+                  let checksum = URL(string: sumAsset.browser_download_url),
+                  Self.isOwnReleaseAsset(archive), Self.isOwnReleaseAsset(checksum) else {
+                phase = .upToDate
+                return
+            }
 
             let release = Release(version: version, notes: payload.body ?? "",
-                                  page: page, archive: archive, size: asset.size)
+                                  page: page, archive: archive, checksum: checksum, size: asset.size)
             if Self.isNewer(version, than: AppVersion.short) {
                 latest = release
                 phase = .available
@@ -123,6 +132,12 @@ final class Updater: ObservableObject {
     /// Сравнение «2.10.0» > «2.9.3» по числам, а не по строкам. Сборка без
     /// Info.plist («dev», запуск через swift run) обновлений не предлагает —
     /// иначе разработческий запуск вечно просил бы обновиться.
+    /// Скачиваем только файлы релизов нашего репозитория и только по https.
+    static func isOwnReleaseAsset(_ url: URL) -> Bool {
+        url.scheme == "https" && url.host == "github.com"
+            && url.path.hasPrefix("/\(repository)/releases/download/")
+    }
+
     nonisolated static func isNewer(_ candidate: String, than current: String) -> Bool {
         guard current != "dev" else { return false }
         let a = candidate.split(separator: ".").map { Int($0) ?? 0 }
@@ -163,6 +178,22 @@ final class Updater: ObservableObject {
             }
 
             phase = .installing
+
+            // Сверяем архив с опубликованной контрольной суммой: битую или
+            // подменённую загрузку не распаковываем.
+            let (sumData, sumResponse) = try await URLSession.shared.data(from: release.checksum)
+            guard (sumResponse as? HTTPURLResponse)?.statusCode == 200,
+                  let expected = String(data: sumData, encoding: .utf8)?
+                    .split(whereSeparator: { $0.isWhitespace }).first.map({ $0.lowercased() }),
+                  expected.count == 64 else {
+                throw UpdateError(L.t("не удалось получить контрольную сумму архива", "could not fetch the archive checksum"))
+            }
+            let actual = try Self.sha256(of: zip)
+            guard actual == expected else {
+                throw UpdateError(L.t("контрольная сумма архива не совпала — обновление не установлено",
+                                      "the archive checksum does not match — the update was not installed"))
+            }
+
             let unpacked = work.appendingPathComponent("unpacked", isDirectory: true)
             try Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
 
@@ -176,6 +207,13 @@ final class Updater: ObservableObject {
             }
             guard info?["CFBundleShortVersionString"] as? String == release.version else {
                 throw UpdateError(L.t("версия в архиве не совпадает с релизом", "the archive's version does not match the release"))
+            }
+            // Подпись приложения должна быть целой: если в нём что-то поменяли
+            // после сборки, codesign это заметит.
+            do {
+                try Self.run("/usr/bin/codesign", ["--verify", "--deep", app.path])
+            } catch {
+                throw UpdateError(L.t("подпись приложения в архиве нарушена", "the app's signature in the archive is broken"))
             }
             try? Self.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
 
@@ -218,6 +256,16 @@ final class Updater: ObservableObject {
 
     private static func quoted(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func sha256(of file: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private static func run(_ tool: String, _ arguments: [String]) throws {

@@ -10,6 +10,7 @@ enum LinkParser {
         case missingUser
         case missingHost
         case missingPort
+        case unsupportedSecurity(String)
 
         var errorDescription: String? {
             switch self {
@@ -20,6 +21,9 @@ enum LinkParser {
             case .missingUser:   return L.t("В ссылке нет идентификатора пользователя.", "The link has no user id.")
             case .missingHost:   return L.t("В ссылке нет адреса сервера.", "The link has no server address.")
             case .missingPort:   return L.t("В ссылке нет порта.", "The link has no port.")
+            case .unsupportedSecurity(let value):
+                return L.t("Неизвестный тип защиты «\(value)» — такой узел не добавляю, чтобы не подключиться без шифрования.",
+                           "Unknown security type \"\(value)\" — the node is skipped so it never connects unencrypted.")
             }
         }
     }
@@ -79,7 +83,14 @@ enum LinkParser {
         config.encryption = query["encryption"] ?? "none"
         config.flow = nonEmpty(query["flow"])
 
-        config.security = Security(rawValue: query["security"]?.lowercased() ?? "none") ?? .none
+        // Неизвестное значение нельзя молча превращать в «без защиты»:
+        // опечатка или новый режим на панели обернулись бы подключением
+        // без шифрования. Пустое или отсутствующее поле — это «none».
+        let securityValue = (nonEmpty(query["security"]) ?? "none").lowercased()
+        guard let security = Security(rawValue: securityValue) else {
+            throw Failure.unsupportedSecurity(securityValue)
+        }
+        config.security = security
         config.transport = Transport(rawValue: normalizedTransport(query)) ?? .tcp
 
         config.sni = nonEmpty(query["sni"]) ?? nonEmpty(query["peer"])

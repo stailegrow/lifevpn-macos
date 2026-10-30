@@ -282,9 +282,13 @@ final class ServerStore: ObservableObject {
         if showsBusy { isPinging = true }
         defer { if showsBusy { isPinging = false } }
 
+        // Список берём один раз: пока идут замеры, узлы могут удалить или
+        // обновить подпиской, и границы порций по живому массиву съехали бы
+        // за его конец.
+        let targets = servers
         let batch = 4
-        for chunk in stride(from: 0, to: servers.count, by: batch) {
-            let slice = Array(servers[chunk..<min(chunk + batch, servers.count)])
+        for chunk in stride(from: 0, to: targets.count, by: batch) {
+            let slice = Array(targets[chunk..<min(chunk + batch, targets.count)])
             await withTaskGroup(of: (ProxyConfig.ID, Int?).self) { group in
                 for server in slice {
                     let (id, host, port) = (server.id, server.address, server.port)
@@ -328,6 +332,8 @@ final class ServerStore: ObservableObject {
     }
 
     private func record(_ id: ProxyConfig.ID, _ value: Int?) {
+        // Узел удалили, пока шёл замер, — его результат больше не нужен.
+        guard servers.contains(where: { $0.id == id }) else { return }
         pings.updateValue(value, forKey: id)
         guard let value else { return }
         var history = pingHistory[id] ?? []

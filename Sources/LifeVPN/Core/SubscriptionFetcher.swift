@@ -41,10 +41,30 @@ enum SubscriptionFetcher {
 
     // MARK: - Загрузка
 
+    /// localhost, *.local и частные IPv4-диапазоны — трафик не выходит за
+    /// пределы локальной сети.
+    static func isLocalHost(_ host: String) -> Bool {
+        let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if h == "localhost" || h.hasSuffix(".local") || h == "::1" { return true }
+        let octets = h.split(separator: ".").compactMap { Int($0) }
+        guard octets.count == 4, h.split(separator: ".").count == 4 else { return false }
+        switch (octets[0], octets[1]) {
+        case (10, _), (127, _), (192, 168), (169, 254): return true
+        case (172, 16...31): return true
+        default: return false
+        }
+    }
+
     static func fetch(_ urlString: String, timeout: TimeInterval = 20) async throws -> Payload {
         guard let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
               let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
             throw Failure(message: L.t("Это не похоже на ссылку подписки.", "This does not look like a subscription link."))
+        }
+        // По голому http список узлов может подменить любой на пути
+        // соединения — разрешаем его только для адресов локальной сети.
+        if scheme == "http", !isLocalHost(url.host ?? "") {
+            throw Failure(message: L.t("Ссылка подписки начинается с http:// — по такой ссылке список узлов можно подменить по дороге. Попросите у провайдера https-ссылку.",
+                                       "The subscription link uses http:// — the node list could be tampered with on the way. Ask your provider for an https link."))
         }
 
         var lastFailure: Failure?

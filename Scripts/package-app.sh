@@ -72,7 +72,10 @@ PLIST
 
 # Ad-hoc подпись: без Apple-аккаунта, но локально приложение и вложенные
 # бинарники запускаются.
-codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
+# Подпись обязательна: обновлятор проверяет её у скачанного приложения
+# (codesign --verify) и не ставит копию, которую изменили после сборки.
+codesign --force --deep --sign - "${APP_DIR}"
+codesign --verify --deep --strict "${APP_DIR}"
 xattr -dr com.apple.quarantine "${APP_DIR}" 2>/dev/null || true
 
 echo "Готово: ${APP_DIR}"

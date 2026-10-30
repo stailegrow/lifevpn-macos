@@ -65,6 +65,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           V="${{ steps.v.outputs.version }}"
-          gh release create "v$V" "dist/LifeVPN-$V.zip" \
+          # Контрольная сумма архива: приложение сверяет её перед установкой.
+          shasum -a 256 "dist/LifeVPN-$V.zip" | awk '{print $1}' > "dist/LifeVPN-$V.zip.sha256"
+          gh release create "v$V" "dist/LifeVPN-$V.zip" "dist/LifeVPN-$V.zip.sha256" \
             --title "Life VPN $V" \
             --notes-file Scripts/release-notes.md
