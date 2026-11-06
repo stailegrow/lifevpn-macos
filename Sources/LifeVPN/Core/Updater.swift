@@ -28,6 +28,9 @@ final class Updater: ObservableObject {
         let page: URL
         let archive: URL
         let checksum: URL
+        /// Подпись издателя (`<архив>.sig`). Без неё автоматическая
+        /// установка не выполняется.
+        let signature: URL?
         let size: Int64
     }
 
@@ -114,8 +117,12 @@ final class Updater: ObservableObject {
                 return
             }
 
+            let signature = payload.assets.first(where: { $0.name == asset.name + ".sig" })
+                .flatMap { URL(string: $0.browser_download_url) }
+                .flatMap { Self.isOwnReleaseAsset($0) ? $0 : nil }
             let release = Release(version: version, notes: payload.body ?? "",
-                                  page: page, archive: archive, checksum: checksum, size: asset.size)
+                                  page: page, archive: archive, checksum: checksum,
+                                  signature: signature, size: asset.size)
             if Self.isNewer(version, than: AppVersion.short) {
                 latest = release
                 phase = .available
@@ -166,6 +173,16 @@ final class Updater: ObservableObject {
             return
         }
 
+        // Контрольная сумма лежит в том же релизе, что и архив, — от подмены
+        // релиза она не защищает. Устанавливаем сами только то, что подписано
+        // ключом издателя, закреплённым в этой программе.
+        guard let signatureURL = release.signature else {
+            NSWorkspace.shared.open(release.page)
+            phase = .failed(L.t("У релиза нет подписи издателя — автоматическая установка отключена. Страница релиза открыта в браузере.",
+                                "The release has no publisher signature — automatic install is disabled. The release page opened in the browser."))
+            return
+        }
+
         do {
             phase = .downloading(0)
             let work = FileManager.default.temporaryDirectory
@@ -181,7 +198,7 @@ final class Updater: ObservableObject {
 
             // Сверяем архив с опубликованной контрольной суммой: битую или
             // подменённую загрузку не распаковываем.
-            let (sumData, sumResponse) = try await URLSession.shared.data(from: release.checksum)
+            let (sumData, sumResponse) = try await Self.fetchSmall(release.checksum)
             guard (sumResponse as? HTTPURLResponse)?.statusCode == 200,
                   let expected = String(data: sumData, encoding: .utf8)?
                     .split(whereSeparator: { $0.isWhitespace }).first.map({ $0.lowercased() }),
@@ -193,12 +210,23 @@ final class Updater: ObservableObject {
                 throw UpdateError(L.t("контрольная сумма архива не совпала — обновление не установлено",
                                       "the archive checksum does not match — the update was not installed"))
             }
+            let (sigData, sigResponse) = try await Self.fetchSmall(signatureURL)
+            guard (sigResponse as? HTTPURLResponse)?.statusCode == 200,
+                  let sigText = String(data: sigData, encoding: .utf8),
+                  let signature = Data(base64Encoded: sigText.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  UpdateSignature.verify(signature, product: "lifevpn-macos", version: release.version, sha256: actual) else {
+                throw UpdateError(L.t("подпись издателя не прошла проверку — обновление не установлено",
+                                      "the publisher signature did not verify — the update was not installed"))
+            }
 
             let unpacked = work.appendingPathComponent("unpacked", isDirectory: true)
             try Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
 
-            guard let app = try FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil)
-                .first(where: { $0.pathExtension == "app" }) else {
+            let apps = try FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: [.isSymbolicLinkKey, .isDirectoryKey])
+                .filter { $0.pathExtension == "app" }
+            guard apps.count == 1, let app = apps.first,
+                  let values = try? app.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey]),
+                  values.isSymbolicLink != true, values.isDirectory == true else {
                 throw UpdateError(L.t("в архиве нет приложения", "the archive holds no app"))
             }
             let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist"))
@@ -211,7 +239,7 @@ final class Updater: ObservableObject {
             // Подпись приложения должна быть целой: если в нём что-то поменяли
             // после сборки, codesign это заметит.
             do {
-                try Self.run("/usr/bin/codesign", ["--verify", "--deep", app.path])
+                try Self.run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path])
             } catch {
                 throw UpdateError(L.t("подпись приложения в архиве нарушена", "the app's signature in the archive is broken"))
             }
@@ -256,6 +284,19 @@ final class Updater: ObservableObject {
 
     private static func quoted(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Маленький файл релиза (контрольная сумма, подпись): только HTTPS на
+    /// каждом перенаправлении и не больше 64 КиБ.
+    private static func fetchSmall(_ url: URL) async throws -> (Data, URLResponse) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: configuration,
+                                 delegate: SubscriptionFetcher.SecureRedirectDelegate(), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(from: url)
+        guard data.count <= 64 * 1024 else { throw UpdateError(L.t("файл релиза слишком большой", "the release file is too large")) }
+        return (data, response)
     }
 
     private static func sha256(of file: URL) throws -> String {
@@ -324,6 +365,19 @@ private final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked
         }
     }
 
+    /// Перенаправления GitHub на хранилище файлов — только по HTTPS.
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let url = request.url, url.scheme?.lowercased() == "https" else {
+            completionHandler(nil)
+            task.cancel()
+            return
+        }
+        completionHandler(request)
+    }
+
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                     didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
                     totalBytesExpectedToWrite: Int64) {
@@ -351,5 +405,26 @@ private final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked
             continuation?.resume(throwing: error)
             continuation = nil
         }
+    }
+}
+
+/// Подпись обновлений ключом издателя Life VPN (Ed25519).
+///
+/// Публичный ключ закреплён в программе; закрытый хранится у издателя и в
+/// секрете сборочного workflow. Ключ, пришедший вместе с обновлением,
+/// доверием не считается. Подписывается строка
+/// `LifeVPN-update-v1\n<продукт>\n<версия>\n<sha256 архива>\n`.
+enum UpdateSignature {
+    static let publicKeyBase64 = "Z96lge0uLd3Kmr/kGidg+hI9cH0f5IblP3ukfi32VHs="
+
+    static func message(product: String, version: String, sha256: String) -> Data {
+        Data("LifeVPN-update-v1\n\(product)\n\(version)\n\(sha256.lowercased())\n".utf8)
+    }
+
+    static func verify(_ signature: Data, product: String, version: String, sha256: String,
+                       publicKey: String = publicKeyBase64) -> Bool {
+        guard let raw = Data(base64Encoded: publicKey),
+              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: raw) else { return false }
+        return key.isValidSignature(signature, for: message(product: product, version: version, sha256: sha256))
     }
 }

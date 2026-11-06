@@ -54,7 +54,15 @@ final class ConnectionManager: ObservableObject {
         // Прошлый запуск мог оставить системный прокси включённым.
         // В демо системный прокси не трогаем вовсе: рядом может работать
         // настоящая копия приложения с поднятым туннелем.
-        recoveredFromCrash = DemoMode.isOn ? false : SystemProxy.cleanUpAfterCrash()
+        guard !DemoMode.isOn else { return }
+        do {
+            recoveredFromCrash = try SystemProxy.cleanUpAfterCrash()
+        } catch {
+            // Журнал остаётся на месте; пока прокси не вернётся, новое
+            // подключение не начнётся, а ошибку видно на главном экране.
+            proxyApplied = true
+            state = .failed(error.localizedDescription + "\n" + SystemProxy.recoveryFailure)
+        }
     }
 
     // MARK: - Подключение
@@ -98,6 +106,7 @@ final class ConnectionManager: ObservableObject {
         if DemoMode.isOn {
             state = .connecting
             try? await Task.sleep(for: .seconds(1.2))
+            guard !isStale(generation) else { return }
             activeServer = server
             connectedSince = Date().addingTimeInterval(-2_537)
             state = .connected
@@ -105,10 +114,15 @@ final class ConnectionManager: ObservableObject {
             SessionTraffic.shared.fillDemo()
             return
         }
-        if state.isConnected || state.isBusy || proxyApplied || core.isRunning {
+        if state.isConnected || state.isBusy || proxyApplied || core.isRunning || SystemProxy.hasPendingRecovery {
             await performDisconnect()
         }
         guard !isStale(generation) else { return }
+        // Прежние настройки прокси так и не вернулись — новое подключение
+        // их бы затёрло. Сначала успешное восстановление.
+        if proxyApplied || SystemProxy.hasPendingRecovery {
+            return
+        }
 
         socksPort = AppSettings.shared.socksPort
         httpPort = AppSettings.shared.httpPort
@@ -137,7 +151,7 @@ final class ConnectionManager: ObservableObject {
                 routing: routing
             )
             let json = try XrayConfigBuilder.makeJSON(for: server, options: options)
-            try json.write(to: Paths.generatedConfig, options: .atomic)
+            try Paths.writePrivate(json, to: Paths.generatedConfig)
             RoutingLog.shared.reset()
 
             try core.start(configPath: Paths.generatedConfig, logPath: Paths.coreLog)
@@ -158,10 +172,17 @@ final class ConnectionManager: ObservableObject {
                 throw Failure.noTunnel(log: log)
             }
 
-            // enable() сам откатывает частично применённые настройки, если
-            // одна из команд networksetup не прошла.
-            try SystemProxy.enable(socksPort: socksPort, httpPort: httpPort)
+            // Часть настроек может примениться ещё до того, как enable()
+            // вернёт ошибку, поэтому считаем прокси тронутым заранее. Если
+            // enable() сам всё откатил, журнала не останется.
             proxyApplied = true
+            do {
+                try SystemProxy.enable(socksPort: socksPort, httpPort: httpPort)
+            } catch {
+                proxyApplied = SystemProxy.hasPendingRecovery
+                throw error
+            }
+            if isStale(generation) { await tearDown(); return }
 
             externalIP = ip
             connectedSince = Date()
@@ -170,12 +191,12 @@ final class ConnectionManager: ObservableObject {
             SessionTraffic.shared.start()
 
         } catch {
-            await tearDown()
+            let restoreError = await tearDown()
             // Отменённая попытка ошибкой не считается: её сменила новая
             // команда, и состояние теперь задаёт она.
             guard !isStale(generation) else { return }
             connectedSince = nil
-            state = .failed(error.localizedDescription)
+            state = .failed(error.localizedDescription + (restoreError.map { "\n" + $0 } ?? ""))
         }
     }
 
@@ -186,8 +207,8 @@ final class ConnectionManager: ObservableObject {
             connectedSince = nil
             return
         }
-        await tearDown()
-        state = .disconnected
+        let restoreError = await tearDown()
+        state = restoreError.map { .failed($0) } ?? .disconnected
         externalIP = nil
         connectedSince = nil
         speed = nil
@@ -205,11 +226,14 @@ final class ConnectionManager: ObservableObject {
     /// Вызывается при выходе из приложения: системный прокси обязан быть снят,
     /// иначе пользователь останется без интернета.
     func shutdownSynchronously() {
-        if proxyApplied {
-            SystemProxy.disable()
-            proxyApplied = false
-        }
-        core.stop()
+        // Текущая команда устарела: что бы она ни ждала, после выхода из
+        // ожидания ничего публиковать и включать не станет.
+        generation += 1
+        operation?.cancel()
+        // Ядро останавливается в любом случае; неудачное восстановление
+        // успешным не объявляется, а журнал остаётся для следующего запуска.
+        defer { core.stop() }
+        _ = restoreSystemProxy()
     }
 
     // MARK: - Скорость
@@ -268,30 +292,45 @@ final class ConnectionManager: ObservableObject {
 
     // MARK: - Служебное
 
-    private func tearDown() async {
+    /// Возвращает прежние настройки прокси. `nil` — всё хорошо, иначе текст
+    /// ошибки: журнал при этом сохранён, а следующее отключение повторит
+    /// попытку.
+    private func restoreSystemProxy() -> String? {
+        guard proxyApplied || SystemProxy.hasPendingRecovery else { return nil }
+        do {
+            try SystemProxy.restore()
+            proxyApplied = false
+            return nil
+        } catch {
+            proxyApplied = true
+            return error.localizedDescription + "\n" + SystemProxy.recoveryFailure
+        }
+    }
+
+    @discardableResult
+    private func tearDown() async -> String? {
         RoutingLog.shared.end()
         SessionTraffic.shared.stop()
-        if proxyApplied {
-            SystemProxy.disable()
-            proxyApplied = false
-        }
-        core.stop()
+        defer { core.stop() }
+        return restoreSystemProxy()
     }
 
     private func handleCoreCrash(code: Int32) {
         RoutingLog.shared.end()
         SessionTraffic.shared.stop()
         guard state.isConnected || state.isBusy else { return }
-        if proxyApplied {
-            SystemProxy.disable()
-            proxyApplied = false
-        }
+        // Неожиданный выход ядра делает текущую попытку устаревшей: она не
+        // должна после своего ожидания включить прокси в пустоту.
+        generation += 1
+        operation?.cancel()
+        let restoreError = restoreSystemProxy()
         let log = XrayProcess.readLog(at: Paths.coreLog, lines: 8)
         externalIP = nil
         connectedSince = nil
-        state = .failed(log.isEmpty
+        let base = log.isEmpty
             ? L.t("Ядро неожиданно завершилось (код \(code)).", "The core exited unexpectedly (code \(code)).")
-            : L.t("Ядро неожиданно завершилось (код \(code)):\n\(log)", "The core exited unexpectedly (code \(code)):\n\(log)"))
+            : L.t("Ядро неожиданно завершилось (код \(code)):\n\(log)", "The core exited unexpectedly (code \(code)):\n\(log)")
+        state = .failed(base + (restoreError.map { "\n" + $0 } ?? ""))
     }
 
     enum Failure: LocalizedError {

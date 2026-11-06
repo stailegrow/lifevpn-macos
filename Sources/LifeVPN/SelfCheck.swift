@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Darwin
 
 /// Внутренние проверки вместо XCTest.
 ///
@@ -78,6 +80,7 @@ enum SelfCheck {
         checkStoreSync()
         checkRouting()
         checkPingStatistics()
+        checkSecurityHardening()
 
         print("")
         if failures.isEmpty {
@@ -249,7 +252,7 @@ enum SelfCheck {
         check("base64-тело подписки разворачивается") {
             let plain = "\(Sample.realityTCP)\n\(Sample.realityXHTTP)"
             let encoded = Data(plain.utf8).base64EncodedString()
-            let links = SubscriptionFetcher.decodeBody(encoded)
+            let links = try SubscriptionFetcher.decodeBody(encoded)
             try equal(links.count, 2, "число ссылок")
         }
 
@@ -259,12 +262,12 @@ enum SelfCheck {
                 .replacingOccurrences(of: "+", with: "-")
                 .replacingOccurrences(of: "/", with: "_")
                 .replacingOccurrences(of: "=", with: "")
-            try equal(SubscriptionFetcher.decodeBody(encoded).count, 1, "число ссылок")
+            try equal(try SubscriptionFetcher.decodeBody(encoded).count, 1, "число ссылок")
         }
 
         check("обычный текст остаётся текстом") {
             let plain = "\(Sample.realityTCP)\n\(Sample.realityXHTTP)"
-            try equal(SubscriptionFetcher.decodeBody(plain).count, 2, "число ссылок")
+            try equal(try SubscriptionFetcher.decodeBody(plain).count, 2, "число ссылок")
         }
 
         check("заголовок subscription-userinfo разбирается") {
@@ -485,6 +488,175 @@ enum SelfCheck {
                                            subscriptionID: subscriptionID)
             try equal(result.servers.count, 1, "ручной сервер должен уцелеть")
             try equal(result.removed, 0, "удалено")
+        }
+    }
+
+    // MARK: - Безопасность (3.1.5)
+
+    private static func checkSecurityHardening() {
+        let sample = Sample.realityTCP
+
+        check("подписка: ровно 10 000 ссылок принимается") {
+            let text = Array(repeating: sample, count: SubscriptionFetcher.maxSubscriptionLinks).joined(separator: "\n")
+            try equal(try SubscriptionFetcher.decodeBody(text).count, 10_000, "число ссылок")
+        }
+
+        check("подписка: 10 001 ссылка отклоняется, а не обрезается") {
+            let text = Array(repeating: sample, count: SubscriptionFetcher.maxSubscriptionLinks + 1).joined(separator: "\n")
+            do {
+                _ = try SubscriptionFetcher.decodeBody(text)
+                throw Failure(message: "лишняя ссылка принята")
+            } catch is SubscriptionFetcher.Failure {}
+        }
+
+        check("подписка: 10 001 ссылка в base64 тоже отклоняется") {
+            let text = Array(repeating: sample, count: SubscriptionFetcher.maxSubscriptionLinks + 1).joined(separator: "\n")
+            let encoded = Data(text.utf8).base64EncodedString()
+            do {
+                _ = try SubscriptionFetcher.decodeBody(encoded)
+                throw Failure(message: "лишняя ссылка принята")
+            } catch is SubscriptionFetcher.Failure {}
+        }
+
+        check("подписка: CR, CRLF, Unicode-перенос, комментарии и дубликаты") {
+            let text = "# c\r\n\(sample)\r\(sample)\u{2028}\n\n\(sample)"
+            try equal(try SubscriptionFetcher.decodeBody(text).count, 3, "число ссылок")
+        }
+
+        check("подписка: много пустых разделителей между ссылками") {
+            let text = sample + String(repeating: "\n", count: 200_000) + sample
+            try equal(try SubscriptionFetcher.decodeBody(text).count, 2, "число ссылок")
+        }
+
+        check("подписка: тело ровно 8 МиБ принимается, 8 МиБ + 1 — нет") {
+            var body = SubscriptionFetcher.BoundedBody(limit: 8)
+            for byte in [UInt8](repeating: 65, count: 8) { try body.append(byte) }
+            do {
+                try body.append(65)
+                throw Failure(message: "лишний байт принят")
+            } catch is SubscriptionFetcher.Failure {}
+            try equal(SubscriptionFetcher.maxSubscriptionBytes, 8_388_608, "лимит")
+        }
+
+        check("подписка: битый base64 и не-UTF-8 не роняют разбор") {
+            try equal(try SubscriptionFetcher.decodeBody("!!!не base64***"), [], "ссылок")
+            try expect(SubscriptionFetcher.decodeBase64(Data([0xff, 0xfe, 0xfd]).base64EncodedString()) == nil, "не-UTF-8")
+        }
+
+        check("подписка: только https, http отклоняется и для локальных адресов") {
+            try expect(SubscriptionFetcher.isSecureSubscriptionURL(URL(string: "https://example.org/s")!), "https")
+            try expect(!SubscriptionFetcher.isSecureSubscriptionURL(URL(string: "http://example.org/s")!), "http")
+            try expect(!SubscriptionFetcher.isSecureSubscriptionURL(URL(string: "http://192.168.1.2/s")!), "локальный http")
+            try expect(!SubscriptionFetcher.isSecureSubscriptionURL(URL(string: "https:///s")!), "пустой хост")
+        }
+
+        check("userinfo: 100 + 200 = 300, отсутствующее поле не мешает") {
+            try equal(SubscriptionFetcher.parseUserInfo("upload=100; download=200").used, 300, "used")
+            try equal(SubscriptionFetcher.parseUserInfo("download=200; total=5").used, 200, "used")
+        }
+
+        check("userinfo: отрицательное и переполненное значение — неизвестно") {
+            let negative = SubscriptionFetcher.parseUserInfo("upload=-1; download=200; total=-5")
+            try expect(negative.used == nil, "used при битом upload")
+            try expect(negative.total == nil, "отрицательный total")
+            let overflow = SubscriptionFetcher.parseUserInfo("upload=9223372036854775807; download=1")
+            try expect(overflow.used == nil, "переполнение суммы")
+            let huge = SubscriptionFetcher.parseUserInfo("upload=99999999999999999999; download=1")
+            try expect(huge.used == nil, "переполнение Int64")
+        }
+
+        check("userinfo: недопустимая и нулевая дата") {
+            try expect(SubscriptionFetcher.parseUserInfo("expire=0").expiresAt == nil, "expire=0")
+            try expect(SubscriptionFetcher.parseUserInfo("expire=abc").expiresAt == nil, "текст")
+            try expect(SubscriptionFetcher.parseUserInfo("expire=9223372036854775807").expiresAt == nil, "огромная дата")
+        }
+
+        check("profile-update-interval: только положительное конечное") {
+            try equal(SubscriptionFetcher.parseUpdateIntervalHours("1"), 24, "1 день")
+            for bad in ["0", "-1", "inf", "Infinity", "nan", "1e308", "abc"] {
+                try expect(SubscriptionFetcher.parseUpdateIntervalHours(bad) == nil, "интервал \(bad)")
+            }
+        }
+
+        check("ссылка с неизвестным security отклоняется") {
+            let bad = sample.replacingOccurrences(of: "security=reality", with: "security=quantum")
+            do {
+                _ = try LinkParser.parse(bad)
+                throw Failure(message: "неизвестный security принят")
+            } catch is LinkParser.Failure {}
+        }
+
+        check("журнал прокси: новый, legacy и повреждённый формат") {
+            let snapshot = SystemProxy.ServiceSnapshot(
+                socks: .init(enabled: false, server: "", port: "0", authenticated: false),
+                web: .init(enabled: true, server: "corp.example", port: "3128", authenticated: false),
+                secureWeb: .init(enabled: false, server: "", port: "0", authenticated: nil),
+                bypass: ["*.corp"], serviceID: "ABC")
+            let data = try JSONEncoder().encode(SystemProxy.State(services: ["Wi-Fi": snapshot]))
+            guard case .snapshots(let state) = try SystemProxy.decodeRecord(data) else { throw Failure(message: "новый формат") }
+            try equal(state.services["Wi-Fi"], snapshot, "снимок")
+            // Формат 3.1.4 — без serviceID и authenticated.
+            let v314 = #"{"services":{"Wi-Fi":{"socks":{"enabled":false,"server":"","port":"0"},"web":{"enabled":false,"server":"","port":"0"},"secureWeb":{"enabled":false,"server":"","port":"0"},"bypass":[]}}}"#
+            guard case .snapshots = try SystemProxy.decodeRecord(Data(v314.utf8)) else { throw Failure(message: "формат 3.1.4") }
+            guard case .legacy(let names) = try SystemProxy.decodeRecord(Data(#"["Wi-Fi"]"#.utf8)) else { throw Failure(message: "legacy") }
+            try equal(names, ["Wi-Fi"], "legacy-имена")
+            for broken in ["", "{", "[]", #"{"services":{}}"#, "null"] {
+                do {
+                    _ = try SystemProxy.decodeRecord(Data(broken.utf8))
+                    throw Failure(message: "повреждённый журнал принят: \(broken)")
+                } catch is SystemProxy.Failure {}
+            }
+        }
+
+        check("networksetup: распознаётся прокси с паролем") {
+            let entry = SystemProxy.parseEntry("Enabled: Yes\nServer: p.example\nPort: 8080\nAuthenticated Proxy Enabled: 1")
+            try expect(entry.enabled && entry.authenticated == true, "authenticated")
+        }
+
+        check("подпись обновления: верная принимается, чужая и подменённая — нет") {
+            let key = Curve25519.Signing.PrivateKey()
+            let publicKey = key.publicKey.rawRepresentation.base64EncodedString()
+            let sha = String(repeating: "a", count: 64)
+            let message = UpdateSignature.message(product: "lifevpn-macos", version: "3.1.5", sha256: sha)
+            let signature = try key.signature(for: message)
+            try expect(UpdateSignature.verify(signature, product: "lifevpn-macos", version: "3.1.5", sha256: sha, publicKey: publicKey), "верная")
+            try expect(!UpdateSignature.verify(signature, product: "lifevpn-macos", version: "3.1.6", sha256: sha, publicKey: publicKey), "другая версия")
+            try expect(!UpdateSignature.verify(signature, product: "lifevpn-windows", version: "3.1.5", sha256: sha, publicKey: publicKey), "другой продукт")
+            try expect(!UpdateSignature.verify(signature, product: "lifevpn-macos", version: "3.1.5", sha256: sha), "чужой ключ")
+        }
+
+        check("каталог данных: 0700/0600, ACL снят, файл 000 читается, ссылка отклонена") {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("lifevpn-check-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let file = root.appendingPathComponent("servers.json")
+            try Data("test".utf8).write(to: file)
+            let chmodACL = Process()
+            chmodACL.executableURL = URL(fileURLWithPath: "/bin/chmod")
+            chmodACL.arguments = ["+a", "everyone allow read,search", root.path]
+            try chmodACL.run(); chmodACL.waitUntilExit()
+            chmod(file.path, 0)
+            try Paths.secureDirectory(root)
+            var info = stat()
+            stat(root.path, &info); try equal(info.st_mode & 0o777, 0o700, "права каталога")
+            stat(file.path, &info); try equal(info.st_mode & 0o777, 0o600, "права файла")
+            try equal(try String(contentsOf: file, encoding: .utf8), "test", "содержимое")
+            if let acl = acl_get_file(root.path, ACL_TYPE_EXTENDED) {
+                defer { acl_free(UnsafeMutableRawPointer(acl)) }
+                var entry: acl_entry_t?
+                try expect(acl_get_entry(acl, Int32(ACL_FIRST_ENTRY.rawValue), &entry) != 0, "ACL снят")
+            }
+            // Атомарная запись сохраняет 0600.
+            try Paths.writePrivate(Data("new".utf8), to: file)
+            stat(file.path, &info); try equal(info.st_mode & 0o777, 0o600, "права после записи")
+            // Жёсткая ссылка на секретный файл отклоняется.
+            let hard = root.appendingPathComponent("outside")
+            try expect(link(file.path, hard.path) == 0, "hardlink создан")
+            do { try Paths.secureDirectory(root); throw Failure(message: "hardlink принят") } catch is Paths.Failure {}
+            try FileManager.default.removeItem(at: hard)
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createSymbolicLink(at: file, withDestinationURL: root.appendingPathComponent("missing"))
+            do { try Paths.secureDirectory(root); throw Failure(message: "symlink принят") } catch is Paths.Failure {}
         }
     }
 }

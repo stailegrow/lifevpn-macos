@@ -63,10 +63,20 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
           V="${{ steps.v.outputs.version }}"
           # Контрольная сумма архива: приложение сверяет её перед установкой.
           shasum -a 256 "dist/LifeVPN-$V.zip" | awk '{print $1}' > "dist/LifeVPN-$V.zip.sha256"
-          gh release create "v$V" "dist/LifeVPN-$V.zip" "dist/LifeVPN-$V.zip.sha256" \
+          ASSETS=("dist/LifeVPN-$V.zip" "dist/LifeVPN-$V.zip.sha256")
+          # Подпись издателя: без неё приложение не ставит обновление само,
+          # а открывает страницу релиза. Ключ — секрет UPDATE_SIGNING_KEY.
+          if [ -n "$UPDATE_SIGNING_KEY" ]; then
+            swift Scripts/sign-update.swift lifevpn-macos "$V" "$(cat "dist/LifeVPN-$V.zip.sha256")" > "dist/LifeVPN-$V.zip.sig"
+            ASSETS+=("dist/LifeVPN-$V.zip.sig")
+          else
+            echo "::warning title=Нет подписи::Секрет UPDATE_SIGNING_KEY не задан — релиз без .sig, автообновление 3.1.5+ на него не встанет."
+          fi
+          gh release create "v$V" "${ASSETS[@]}" \
             --title "Life VPN $V" \
             --notes-file Scripts/release-notes.md

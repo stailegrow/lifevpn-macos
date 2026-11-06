@@ -43,7 +43,7 @@ final class XrayProcess {
         try XrayBinary.prepare()
         guard let binary = XrayBinary.url else { throw XrayBinary.Failure.notBundled }
 
-        FileManager.default.createFile(atPath: logPath.path, contents: nil)
+        FileManager.default.createFile(atPath: logPath.path, contents: nil, attributes: [.posixPermissions: 0o600])
         let handle = try FileHandle(forWritingTo: logPath)
 
         let process = Process()

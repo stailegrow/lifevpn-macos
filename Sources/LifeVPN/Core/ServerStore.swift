@@ -200,7 +200,17 @@ final class ServerStore: ObservableObject {
 
         do {
             let payload = try await SubscriptionFetcher.fetch(stored.url)
-            let parsed = LinkParser.parseMany(payload.links.joined(separator: "\n")).configs
+            // Пока шла загрузка, подписку могли удалить — тогда её узлы
+            // возвращать в список нельзя.
+            guard subscriptions.contains(where: { $0.id == stored.id }) else { return false }
+            let parsedResult = LinkParser.parseMany(payload.links.joined(separator: "\n"))
+            let parsed = parsedResult.configs
+            // Ни одна ссылка не распозналась — это ошибка, а не пустая
+            // подписка: прежние узлы сохраняем.
+            guard !parsed.isEmpty else {
+                throw SubscriptionFetcher.Failure(message: parsedResult.errors.first
+                    ?? L.t("Ссылки подписки не распознались — прежние узлы сохранены.", "The subscription links were not recognised — existing nodes are kept."))
+            }
 
             let result = Self.merge(existing: servers,
                                     fetched: parsed,
@@ -356,7 +366,7 @@ final class ServerStore: ObservableObject {
                               selectedID: selectedID,
                               pingHistory: history)
         guard let data = try? JSONEncoder().encode(payload) else { return }
-        try? data.write(to: Paths.servers, options: .atomic)
+        try? Paths.writePrivate(data, to: Paths.servers)
     }
 
     private func load() {

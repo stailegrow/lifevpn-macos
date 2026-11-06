@@ -88,6 +88,6 @@ final class AppSettings: ObservableObject {
                               backgroundAnimation: backgroundAnimation,
                               routing: routing)
         guard let data = try? JSONEncoder().encode(payload) else { return }
-        try? data.write(to: Paths.settings, options: .atomic)
+        try? Paths.writePrivate(data, to: Paths.settings)
     }
 }
