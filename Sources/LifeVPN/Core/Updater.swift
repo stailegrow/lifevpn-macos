@@ -415,7 +415,7 @@ private final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked
 /// доверием не считается. Подписывается строка
 /// `LifeVPN-update-v1\n<продукт>\n<версия>\n<sha256 архива>\n`.
 enum UpdateSignature {
-    static let publicKeyBase64 = "Z96lge0uLd3Kmr/kGidg+hI9cH0f5IblP3ukfi32VHs="
+    static let publicKeyBase64 = "z96lge0uLd3Kmr/kGidg+hI9cH0f5IblP3ukfi32VHs="
 
     static func message(product: String, version: String, sha256: String) -> Data {
         Data("LifeVPN-update-v1\n\(product)\n\(version)\n\(sha256.lowercased())\n".utf8)
