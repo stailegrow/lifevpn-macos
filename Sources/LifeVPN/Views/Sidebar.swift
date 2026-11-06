@@ -40,6 +40,7 @@ struct Sidebar: View {
                         navRow(.servers)
                         navRow(.routing)
                         navRow(.stats)
+                        navRow(.logs)
                     }
                     section(L.t("Общее", "General")) {
                         navRow(.settings)

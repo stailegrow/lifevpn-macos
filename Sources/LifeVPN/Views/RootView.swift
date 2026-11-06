@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum Tab: String, CaseIterable, Identifiable {
-    case home, servers, routing, stats, settings
+    case home, servers, routing, stats, logs, settings
     var id: String { rawValue }
 
     var sidebarTitle: String {
@@ -11,6 +11,7 @@ enum Tab: String, CaseIterable, Identifiable {
         case .servers:  return L.t("Узлы", "Nodes")
         case .routing:  return L.t("Маршрутизация", "Routing")
         case .stats:    return L.t("Статистика", "Statistics")
+        case .logs:     return L.t("Журнал", "Logs")
         case .settings: return L.t("Настройки", "Settings")
         }
     }
@@ -21,6 +22,7 @@ enum Tab: String, CaseIterable, Identifiable {
         case .servers:  return "server.rack"
         case .routing:  return "arrow.up.arrow.down"
         case .stats:    return "chart.bar"
+        case .logs:     return "doc.text.magnifyingglass"
         case .settings: return "gearshape"
         }
     }
@@ -96,6 +98,10 @@ struct RootView: View {
                         case .servers:  ServersTab(query: searchText)
                         case .routing:  RoutingTab()
                         case .stats:    StatsTab()
+                        case .logs:
+                            RoutingLogCard()
+                                .padding(.horizontal, Metrics.gutter)
+                                .padding(.bottom, UI.s(14))
                         case .settings: SettingsTab()
                         }
                     }
@@ -289,6 +295,8 @@ private struct PageHeader: View {
             return L.t("Что идёт через туннель, а что — напрямую", "What goes through the tunnel and what goes direct")
         case .stats:
             return L.t("Скорость, трафик и история задержки", "Speed, traffic and latency history")
+        case .logs:
+            return L.t("Соединения, маршруты и журнал сессии", "Connections, routes and session log")
         case .settings:
             return L.t("Тема, язык и поведение", "Theme, language and behaviour")
         }

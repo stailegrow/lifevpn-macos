@@ -5,6 +5,7 @@ struct HomeTab: View {
     @EnvironmentObject private var connection: ConnectionManager
     @EnvironmentObject private var store: ServerStore
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var updater: Updater
 
     @Binding var sheet: AddSheet.Mode?
     let onPaste: () -> Void
@@ -14,6 +15,7 @@ struct HomeTab: View {
     var body: some View {
         ScrollView {
             VStack(spacing: UI.s(12)) {
+                updateBanner
                 notes
 
                 HeroConnectCard()
@@ -36,6 +38,60 @@ struct HomeTab: View {
             .padding(.bottom, UI.s(14))
         }
         .scrollIndicators(.never)
+    }
+
+    // MARK: - Обновление
+
+    /// Новая версия найдена при запуске — говорим об этом прямо на главной,
+    /// ещё до подключения.
+    @ViewBuilder
+    private var updateBanner: some View {
+        if let release = updater.latest, updater.hasUpdate {
+            HStack(alignment: .center, spacing: UI.s(10)) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: UI.s(16), weight: .semibold))
+                    .foregroundStyle(palette.accentStart)
+                VStack(alignment: .leading, spacing: UI.s(2)) {
+                    Text(L.t("Необходимо обновить приложение", "Please update the app"))
+                        .font(Typography.label(12))
+                        .foregroundStyle(palette.textPrimary)
+                    Text(bannerDetail(release))
+                        .font(Typography.body(10.5))
+                        .foregroundStyle(palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if case .available = updater.phase {
+                    Button(L.t("Обновить", "Update")) {
+                        Task { await updater.install() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(Typography.label(11))
+                    .foregroundStyle(palette.textPrimary)
+                    .padding(.horizontal, UI.s(12))
+                    .padding(.vertical, UI.s(6))
+                    .background(palette.accentStart.opacity(0.25), in: Capsule())
+                }
+            }
+            .padding(.horizontal, UI.s(12))
+            .padding(.vertical, UI.s(10))
+            .background(palette.accentStart.opacity(0.12), in: RoundedRectangle(cornerRadius: UI.s(14), style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: UI.s(14), style: .continuous)
+                .strokeBorder(palette.accentStart.opacity(0.35), lineWidth: 1))
+        }
+    }
+
+    private func bannerDetail(_ release: Updater.Release) -> String {
+        switch updater.phase {
+        case .downloading(let fraction):
+            return L.t("Скачиваю версию \(release.version)… \(Int(fraction * 100))%", "Downloading version \(release.version)… \(Int(fraction * 100))%")
+        case .installing:
+            return L.t("Устанавливаю версию \(release.version)…", "Installing version \(release.version)…")
+        case .failed(let message):
+            return message
+        default:
+            return L.t("Доступна версия \(release.version), у вас \(AppVersion.short).", "Version \(release.version) is available, you have \(AppVersion.short).")
+        }
     }
 
     // MARK: - Заметки

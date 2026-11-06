@@ -59,12 +59,12 @@ final class Updater: ObservableObject {
         }
     }
 
-    /// Фоновая проверка: через полминуты после запуска, чтобы не мешать
-    /// замеру задержки, и дальше каждые шесть часов.
+    /// Проверка сразу при запуске — чтобы ещё до подключения человек увидел,
+    /// что программу нужно обновить, — и дальше каждые шесть часов.
     func startAutomaticChecks() {
         loop?.cancel()
         loop = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(30))
+            try? await Task.sleep(for: .seconds(1))
             while !Task.isCancelled {
                 await self?.check()
                 try? await Task.sleep(for: .seconds(6 * 3600))

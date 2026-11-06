@@ -294,49 +294,32 @@ struct StatsTab: View {
         store.subscriptions.compactMap(\.usedBytes).reduce(0, +)
     }
 
-    @State private var topHeight: CGFloat = 0
-
     var body: some View {
-        GeometryReader { geo in
-            ScrollView {
-                VStack(spacing: UI.s(14)) {
-                    VStack(spacing: UI.s(14)) {
-                        HStack(alignment: .top, spacing: UI.s(14)) {
-                            SpeedCard()
-                                .frame(maxHeight: .infinity)
-                            trafficCard
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
-
-                        if store.servers.isEmpty {
-                            Card(title: L.t("Задержка", "Latency")) {
-                                Text(L.t("Узлов пока нет — добавьте подписку.", "No nodes yet — add a subscription."))
-                                    .font(Typography.body(11.5))
-                                    .foregroundStyle(palette.textSecondary)
-                            }
-                            .fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            LatencyCard(servers: store.servers)
-                        }
-                    }
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: StatsTopHeightKey.self, value: g.size.height)
-                    })
-
-                    // Журнал занимает всё оставшееся место окна, но не
-                    // меньше пары десятков строк — при длинном списке узлов
-                    // экран просто прокручивается.
-                    RoutingLogCard()
-                        .frame(height: max(UI.s(210), geo.size.height - topHeight - UI.s(28)))
+        ScrollView {
+            VStack(spacing: UI.s(14)) {
+                HStack(alignment: .top, spacing: UI.s(14)) {
+                    SpeedCard()
+                        .frame(maxHeight: .infinity)
+                    trafficCard
                 }
-                .padding(.horizontal, Metrics.gutter)
-                .padding(.bottom, UI.s(14))
+                .fixedSize(horizontal: false, vertical: true)
+
+                if store.servers.isEmpty {
+                    Card(title: L.t("Задержка", "Latency")) {
+                        Text(L.t("Узлов пока нет — добавьте подписку.", "No nodes yet — add a subscription."))
+                            .font(Typography.body(11.5))
+                            .foregroundStyle(palette.textSecondary)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    LatencyCard(servers: store.servers)
+                }
+                // Журнал маршрутизации — отдельной вкладкой «Журнал».
             }
-            .scrollIndicators(.never)
-            .onPreferenceChange(StatsTopHeightKey.self) { value in
-                MainActor.assumeIsolated { topHeight = value }
-            }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.bottom, UI.s(14))
         }
+        .scrollIndicators(.never)
         .onAppear { store.startAutoPing() }
         .onDisappear { store.stopAutoPing() }
     }
@@ -428,9 +411,4 @@ private struct ThemeTile: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isHovering)
         .help(option.name)
     }
-}
-
-private struct StatsTopHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
