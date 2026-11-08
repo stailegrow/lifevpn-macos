@@ -190,15 +190,21 @@ final class Updater: ObservableObject {
             try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
 
             let zip = work.appendingPathComponent("LifeVPN.zip")
-            try await Downloader.fetch(release.archive, to: zip) { [weak self] fraction in
-                Task { @MainActor in self?.phase = .downloading(fraction) }
+            let direct: Bool
+            do {
+                direct = try await downloadWithRetries(release.archive, to: zip)
+            } catch {
+                // Все попытки исчерпаны — даём скачать вручную.
+                NSWorkspace.shared.open(release.page)
+                throw UpdateError(L.t("Не удалось скачать обновление (\(error.localizedDescription)). Страница релиза открыта в браузере — можно скачать вручную.",
+                                      "Could not download the update (\(error.localizedDescription)). The release page opened in the browser — you can download it manually."))
             }
 
             phase = .installing
 
             // Сверяем архив с опубликованной контрольной суммой: битую или
             // подменённую загрузку не распаковываем.
-            let (sumData, sumResponse) = try await Self.fetchSmall(release.checksum)
+            let (sumData, sumResponse) = try await Self.fetchSmall(release.checksum, direct: direct)
             guard (sumResponse as? HTTPURLResponse)?.statusCode == 200,
                   let expected = String(data: sumData, encoding: .utf8)?
                     .split(whereSeparator: { $0.isWhitespace }).first.map({ $0.lowercased() }),
@@ -210,7 +216,7 @@ final class Updater: ObservableObject {
                 throw UpdateError(L.t("контрольная сумма архива не совпала — обновление не установлено",
                                       "the archive checksum does not match — the update was not installed"))
             }
-            let (sigData, sigResponse) = try await Self.fetchSmall(signatureURL)
+            let (sigData, sigResponse) = try await Self.fetchSmall(signatureURL, direct: direct)
             guard (sigResponse as? HTTPURLResponse)?.statusCode == 200,
                   let sigText = String(data: sigData, encoding: .utf8),
                   let signature = Data(base64Encoded: sigText.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -252,6 +258,45 @@ final class Updater: ObservableObject {
         }
     }
 
+    /// Хранилище файлов GitHub временами отвечает 503/504 или не отвечает
+    /// вовсе, а путь через VPN-сервер может быть хуже прямого. Поэтому:
+    /// две попытки обычным путём (через системный прокси, если VPN включён),
+    /// затем две — напрямую, мимо прокси, с паузами между ними. Подлинность
+    /// не зависит от пути: архив всё равно сверяется с подписью издателя.
+    /// Возвращает, был ли успешный путь прямым.
+    private func downloadWithRetries(_ url: URL, to destination: URL) async throws -> Bool {
+        let plan: [(direct: Bool, delay: UInt64)] = [(false, 0), (false, 2), (true, 3), (true, 6)]
+        var lastError: Error = UpdateError(L.t("загрузка не удалась", "the download failed"))
+        for step in plan {
+            if step.delay > 0 { try await Task.sleep(nanoseconds: step.delay * 1_000_000_000) }
+            phase = .downloading(0)
+            do {
+                try await Downloader.fetch(url, to: destination, direct: step.direct) { [weak self] fraction in
+                    Task { @MainActor in self?.phase = .downloading(fraction) }
+                }
+                return step.direct
+            } catch {
+                lastError = error
+                guard Self.isRetryable(error) else { throw error }
+            }
+        }
+        throw lastError
+    }
+
+    /// Повторяем только сетевые сбои и ответы 408/429/5xx.
+    nonisolated static func isRetryable(_ error: Error) -> Bool {
+        if let update = error as? UpdateError { return update.retryable }
+        guard let url = error as? URLError else { return false }
+        switch url.code {
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost,
+             .dnsLookupFailed, .notConnectedToInternet, .secureConnectionFailed,
+             .badServerResponse, .resourceUnavailable, .internationalRoamingOff:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Скрипт подмены живёт отдельно от приложения: ждёт, пока процесс
     /// закроется, переносит старую копию в сторону, ставит новую и запускает
     /// её. Если что-то пошло не так — возвращает старую копию на место.
@@ -288,9 +333,10 @@ final class Updater: ObservableObject {
 
     /// Маленький файл релиза (контрольная сумма, подпись): только HTTPS на
     /// каждом перенаправлении и не больше 64 КиБ.
-    private static func fetchSmall(_ url: URL) async throws -> (Data, URLResponse) {
+    private static func fetchSmall(_ url: URL, direct: Bool = false) async throws -> (Data, URLResponse) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForResource = 30
+        if direct { configuration.connectionProxyDictionary = [:] }
         let session = URLSession(configuration: configuration,
                                  delegate: SubscriptionFetcher.SecureRedirectDelegate(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
@@ -337,7 +383,17 @@ final class Updater: ObservableObject {
 
 struct UpdateError: LocalizedError {
     let message: String
-    init(_ message: String) { self.message = message }
+    /// Сбой на стороне сервера/сети, который имеет смысл повторить.
+    var retryable = false
+    init(_ message: String, retryable: Bool = false) {
+        self.message = message
+        self.retryable = retryable
+    }
+
+    /// Ответ сервера, который стоит повторить: 408, 429 и 5xx.
+    static func isRetryableStatus(_ code: Int) -> Bool {
+        code == 408 || code == 429 || (500...599).contains(code)
+    }
     var errorDescription: String? { message }
 }
 
@@ -354,10 +410,15 @@ private final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked
         self.progress = progress
     }
 
-    static func fetch(_ url: URL, to destination: URL,
+    /// `direct` — мимо системного прокси (то есть мимо VPN, если он включён).
+    static func fetch(_ url: URL, to destination: URL, direct: Bool = false,
                       progress: @escaping @Sendable (Double) -> Void) async throws {
         let delegate = Downloader(destination: destination, progress: progress)
-        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        let configuration = URLSessionConfiguration.default
+        // Нет данных минуту — считаем соединение зависшим и идём на повтор.
+        configuration.timeoutIntervalForRequest = 60
+        if direct { configuration.connectionProxyDictionary = [:] }
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             delegate.continuation = continuation
@@ -389,7 +450,8 @@ private final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked
                     didFinishDownloadingTo location: URL) {
         do {
             if let http = downloadTask.response as? HTTPURLResponse, http.statusCode != 200 {
-                throw UpdateError(L.t("сервер ответил кодом \(http.statusCode)", "the server answered with code \(http.statusCode)"))
+                throw UpdateError(L.t("сервер ответил кодом \(http.statusCode)", "the server answered with code \(http.statusCode)"),
+                                  retryable: UpdateError.isRetryableStatus(http.statusCode))
             }
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: location, to: destination)

@@ -640,6 +640,19 @@ enum SelfCheck {
             try expect(entry.enabled && entry.authenticated == true, "authenticated")
         }
 
+        check("загрузка обновления повторяется только при сбоях сети и 408/429/5xx") {
+            for code in [408, 429, 500, 502, 503, 504] {
+                try expect(Updater.isRetryable(UpdateError("x", retryable: UpdateError.isRetryableStatus(code))), "код \(code) — повтор")
+            }
+            for code in [200, 301, 403, 404] {
+                try expect(!UpdateError.isRetryableStatus(code), "код \(code) — без повтора")
+            }
+            try expect(Updater.isRetryable(URLError(.timedOut)), "таймаут — повтор")
+            try expect(Updater.isRetryable(URLError(.networkConnectionLost)), "обрыв — повтор")
+            try expect(!Updater.isRetryable(URLError(.cancelled)), "отмена — без повтора")
+            try expect(!Updater.isRetryable(UpdateError("подпись")), "ошибка подписи — без повтора")
+        }
+
         check("подпись обновления: верная принимается, чужая и подменённая — нет") {
             let key = Curve25519.Signing.PrivateKey()
             let publicKey = key.publicKey.rawRepresentation.base64EncodedString()
