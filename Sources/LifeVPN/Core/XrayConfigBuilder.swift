@@ -14,17 +14,29 @@ enum XrayConfigBuilder {
         var logPath: String?
         /// Журнал соединений: куда ушло каждое — туннель, напрямую, блок.
         var accessLogPath: String?
-        /// Порт эндпоинта счётчиков трафика (см. SessionTraffic).
-        var metricsPort: Int?
+        /// Счётчики трафика. Порта ядро не открывает: эндпоинт metrics
+        /// доступен только как outbound «metrics» по служебному имени
+        /// `metricsHost` через наш же HTTP-прокси и только процессу самой
+        /// программы (`selfProcess`). Отдельный порт на 127.0.0.1 видели бы
+        /// все программы: по нему находят работающий Xray, объём трафика и
+        /// отладочный /debug/pprof.
+        var metrics: Bool = false
+        var selfProcess: [String] = []
+        /// Программы, которые идут мимо туннеля (MAX и подобные, см. IsolatedApps).
+        var isolatedProcesses: [String] = []
         var routing: RoutingConfig = RoutingPreset.global.make()
 
         init(socksPort: Int = 10808, httpPort: Int = 10809,
              logLevel: String = "warning", logPath: String? = nil,
              accessLogPath: String? = nil,
-             metricsPort: Int? = nil,
+             metrics: Bool = false,
+             selfProcess: [String] = [],
+             isolatedProcesses: [String] = [],
              routing: RoutingConfig = RoutingPreset.global.make()) {
             self.accessLogPath = accessLogPath
-            self.metricsPort = metricsPort
+            self.metrics = metrics
+            self.selfProcess = selfProcess
+            self.isolatedProcesses = isolatedProcesses
             self.socksPort = socksPort
             self.httpPort = httpPort
             self.logLevel = logLevel
@@ -55,15 +67,16 @@ enum XrayConfigBuilder {
             "log": log,
             "inbounds": inbounds(options),
             "outbounds": [outbound(for: config), directOutbound(), blockOutbound()],
-            "routing": routing(options.routing)
+            "routing": routing(options.routing, extra: options)
         ]
         if let dns = dns(options.routing) {
             root["dns"] = dns
         }
-        if let port = options.metricsPort {
+        if options.metrics {
             root["stats"] = [String: Any]()
             root["policy"] = ["system": ["statsOutboundUplink": true, "statsOutboundDownlink": true]]
-            root["metrics"] = ["tag": "metrics", "listen": "127.0.0.1:\(port)"]
+            // Без listen — см. Options.metrics.
+            root["metrics"] = ["tag": "metrics"]
         }
         return root
     }
@@ -132,8 +145,26 @@ enum XrayConfigBuilder {
     /// «весь российский трафик напрямую», иначе она поедет мимо фильтра.
     /// Всё, что не совпало ни с чем, уходит в первый outbound — то есть
     /// в туннель.
-    static func routing(_ config: RoutingConfig) -> [String: Any] {
+    /// Служебное имя эндпоинта счётчиков (см. Options.metrics).
+    static let metricsHost = "metrics.lifevpn.internal"
+
+    static func routing(_ config: RoutingConfig, extra: Options? = nil) -> [String: Any] {
         var rules: [[String: Any]] = []
+
+        // Счётчики — только своему процессу; всем остальным это имя закрыто.
+        if let extra, extra.metrics {
+            let me = extra.selfProcess.filter { !$0.isEmpty }
+            if !me.isEmpty {
+                rules.append(["type": "field", "domain": ["full:\(metricsHost)"], "process": me, "outboundTag": "metrics"])
+            }
+            rules.append(["type": "field", "domain": ["full:\(metricsHost)"], "outboundTag": "block"])
+        }
+
+        // Изолированные программы (MAX и т.п.) — напрямую, раньше любых
+        // правил: их проверки внешнего IP не должны видеть адрес сервера.
+        if let isolated = extra?.isolatedProcesses.filter({ !$0.isEmpty }), !isolated.isEmpty {
+            rules.append(["type": "field", "process": isolated, "outboundTag": "direct"])
+        }
 
         // QUIC мимо туннеля не ходит. Наш канал всегда поверх TCP, а
         // ретрансляция UDP-443 через него ненадёжна: часть приложений и

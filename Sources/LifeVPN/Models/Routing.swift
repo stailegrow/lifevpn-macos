@@ -140,3 +140,25 @@ struct RoutingPreset: Identifiable, Sendable {
 
     static let all: [RoutingPreset] = [.bypassRU, .global]
 }
+
+/// Программы, которые в «Обходе РФ» идут мимо туннеля (переключатель
+/// «Изолировать российские программы», включён по умолчанию).
+///
+/// MAX проверяет внешний IP через несколько сервисов и сравнивает ответы —
+/// так находят личный VPN-сервер и связывают его адрес с человеком. Ядро
+/// узнаёт программу по процессу, открывшему соединение с нашим прокси, и
+/// отправляет её трафик напрямую: адрес сервера ей не виден. Помощники
+/// Electron/Chromium («MAX Helper …») делают сетевые запросы сами, поэтому
+/// в списке и они, и вся папка приложения.
+enum IsolatedApps {
+    static let processes: [String] = [
+        "MAX", "Max", "max",
+        "MAX Helper", "MAX Helper (Renderer)", "MAX Helper (GPU)", "MAX Helper (Plugin)",
+        "/Applications/MAX.app/",
+    ]
+
+    static func processes(for routing: RoutingConfig, enabled: Bool) -> [String] {
+        guard enabled, routing.presetID == RoutingPreset.bypassRU.id else { return [] }
+        return processes
+    }
+}

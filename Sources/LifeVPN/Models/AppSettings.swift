@@ -15,6 +15,8 @@ final class AppSettings: ObservableObject {
     @Published var autoConnectOnLaunch: Bool { didSet { save() } }
     @Published var pingOnLaunch: Bool { didSet { save() } }
     @Published var backgroundAnimation: Bool { didSet { save() } }
+    /// MAX и подобные — мимо туннеля в «Обходе РФ» (IsolatedApps).
+    @Published var isolateRuApps: Bool { didSet { save() } }
     @Published var routing: RoutingConfig { didSet { save() } }
 
     var palette: Palette { .named(paletteID) }
@@ -38,6 +40,8 @@ final class AppSettings: ObservableObject {
         var autoConnectOnLaunch = false
         var pingOnLaunch = true
         var backgroundAnimation = true
+        // Необязательное: старый файл без поля читается, по умолчанию — вкл.
+        var isolateRuApps: Bool?
         var routing = RoutingPreset.bypassRU.make()
     }
 
@@ -58,6 +62,7 @@ final class AppSettings: ObservableObject {
         autoConnectOnLaunch = payload.autoConnectOnLaunch
         pingOnLaunch = payload.pingOnLaunch
         backgroundAnimation = payload.backgroundAnimation
+        isolateRuApps = payload.isolateRuApps ?? true
         // В демо — нейтральная маршрутизация с выдуманными доменами: на
         // скриншотах не должно оказаться ничего из настоящих настроек.
         if DemoMode.isOn {
@@ -86,6 +91,7 @@ final class AppSettings: ObservableObject {
                               autoConnectOnLaunch: autoConnectOnLaunch,
                               pingOnLaunch: pingOnLaunch,
                               backgroundAnimation: backgroundAnimation,
+                              isolateRuApps: isolateRuApps,
                               routing: routing)
         guard let data = try? JSONEncoder().encode(payload) else { return }
         try? Paths.writePrivate(data, to: Paths.settings)

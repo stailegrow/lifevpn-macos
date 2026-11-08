@@ -137,8 +137,11 @@ final class ConnectionManager: ObservableObject {
         let routing = await resolvedRouting()
         guard !isStale(generation) else { return }
 
-        let metricsPort = SessionTraffic.freePort()
-        SessionTraffic.shared.reset(port: metricsPort)
+        SessionTraffic.shared.reset(port: httpPort)
+        // Счётчики — только своему процессу (путь к исполняемому файлу и имя).
+        let selfPath = Bundle.main.executablePath ?? CommandLine.arguments[0]
+        let selfProcess = [selfPath, (selfPath as NSString).lastPathComponent]
+        let isolated = IsolatedApps.processes(for: routing, enabled: AppSettings.shared.isolateRuApps)
 
         do {
             let options = XrayConfigBuilder.Options(
@@ -147,7 +150,9 @@ final class ConnectionManager: ObservableObject {
                 logLevel: "warning",
                 logPath: Paths.coreLog.path,
                 accessLogPath: Paths.accessLog.path,
-                metricsPort: metricsPort,
+                metrics: true,
+                selfProcess: selfProcess,
+                isolatedProcesses: isolated,
                 routing: routing
             )
             let json = try XrayConfigBuilder.makeJSON(for: server, options: options)

@@ -17,6 +17,9 @@ struct RoutingTab: View {
         ScrollView {
             VStack(spacing: UI.s(14)) {
                 presetsCard
+                if settings.routing.presetID == RoutingPreset.bypassRU.id {
+                    isolationCard
+                }
                 HStack(alignment: .top, spacing: UI.s(14)) {
                     domainsCard
                     geoCard
@@ -32,6 +35,20 @@ struct RoutingTab: View {
                 .environmentObject(settings)
                 .environment(\.palette, palette)
         }
+    }
+
+    private var isolationCard: some View {
+        Card(title: L.t("Изоляция программ", "App isolation")) {
+            Toggle(L.t("Изолировать российские программы", "Isolate Russian apps"), isOn: $settings.isolateRuApps)
+            Text(L.t("MAX идёт мимо VPN и не узнаёт адрес вашего сервера. Действует со следующего подключения.",
+                     "MAX goes around the VPN and cannot learn your server address. Applies from the next connection."))
+                .font(Typography.body(10))
+                .foregroundStyle(palette.textSecondary.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(Typography.body(12))
+        .foregroundStyle(palette.textPrimary)
+        .toggleStyle(HUDToggleStyle())
     }
 
     private var presetsCard: some View {

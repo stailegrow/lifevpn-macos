@@ -330,6 +330,33 @@ enum SelfCheck {
             try expect(block < direct, "реклама обязана отсекаться до общего правила direct")
         }
 
+        check("счётчики без своего порта и только для своего процесса") {
+            let config = try LinkParser.parse(Sample.realityTCP)
+            let tree = XrayConfigBuilder.makeTree(for: config,
+                                                  options: .init(metrics: true, selfProcess: ["/Applications/LifeVPN.app/Contents/MacOS/LifeVPN"]))
+            let metrics = try unwrap(tree["metrics"] as? [String: Any], "metrics")
+            try expect(metrics["listen"] == nil, "у metrics не должно быть своего порта")
+            try equal(metrics["tag"] as? String, "metrics", "тег metrics")
+            let inbounds = try unwrap(tree["inbounds"] as? [[String: Any]], "inbounds")
+            try equal(inbounds.count, 2, "только socks и http")
+            let routing = try unwrap(tree["routing"] as? [String: Any], "routing")
+            let rules = try unwrap(routing["rules"] as? [[String: Any]], "rules")
+            try equal(rules[0]["outboundTag"] as? String, "metrics", "первое правило — счётчики")
+            try equal(rules[0]["process"] as? [String], ["/Applications/LifeVPN.app/Contents/MacOS/LifeVPN"], "только свой процесс")
+            try equal(rules[1]["outboundTag"] as? String, "block", "остальным служебное имя закрыто")
+            try expect(rules[1]["process"] == nil, "закрыто для всех процессов")
+        }
+
+        check("изоляция MAX — только в «Обходе РФ» и когда включена") {
+            try expect(IsolatedApps.processes(for: RoutingPreset.bypassRU.make(), enabled: true).contains("MAX"), "MAX в списке")
+            try expect(IsolatedApps.processes(for: RoutingPreset.bypassRU.make(), enabled: false).isEmpty, "выключено")
+            try expect(IsolatedApps.processes(for: RoutingPreset.global.make(), enabled: true).isEmpty, "не в «Глобально»")
+            let options = XrayConfigBuilder.Options(isolatedProcesses: ["MAX"], routing: RoutingPreset.bypassRU.make())
+            let rules = try unwrap(XrayConfigBuilder.routing(options.routing, extra: options)["rules"] as? [[String: Any]], "rules")
+            try equal(rules[0]["process"] as? [String], ["MAX"], "изоляция первым правилом")
+            try equal(rules[0]["outboundTag"] as? String, "direct", "напрямую")
+        }
+
         check("QUIC блокируется самым первым правилом") {
             let routing = XrayConfigBuilder.routing(RoutingPreset.bypassRU.make())
             let rules = try unwrap(routing["rules"] as? [[String: Any]], "rules")

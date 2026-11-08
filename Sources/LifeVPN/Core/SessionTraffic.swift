@@ -3,10 +3,12 @@ import Foundation
 
 /// Трафик через туннель за текущую сессию.
 ///
-/// Xray сам считает байты по каждому outbound (`stats` + `policy.system`), а
-/// отдаёт счётчики через встроенный HTTP-эндпоинт `metrics` на 127.0.0.1.
-/// Берём только outbound «proxy»: прямой трафик и заблокированное через VPN
-/// не ходят и в цифру не входят.
+/// Xray сам считает байты по каждому outbound (`stats` + `policy.system`).
+/// Отдельного порта для счётчиков ядро не открывает (его видели бы все
+/// программы на компьютере): запрос идёт через наш же HTTP-прокси на
+/// служебное имя `XrayConfigBuilder.metricsHost`, и ядро пускает к нему
+/// только процесс самой Life VPN. Берём только outbound «proxy»: прямой
+/// трафик и заблокированное через VPN не ходят и в цифру не входят.
 @MainActor
 final class SessionTraffic: ObservableObject {
     static let shared = SessionTraffic()
@@ -18,48 +20,29 @@ final class SessionTraffic: ObservableObject {
 
     private var port: Int?
     private var poller: Task<Void, Never>?
-
-    /// Запросы к счётчикам идут мимо системного прокси, который мы сами же
-    /// и включили: иначе запрос к 127.0.0.1 мог бы уйти в ядро по кругу.
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.connectionProxyDictionary = [:]
-        config.timeoutIntervalForRequest = 2
-        return URLSession(configuration: config)
-    }()
+    private var session: URLSession?
 
     private init() {}
 
-    /// Свободный локальный порт для эндпоинта счётчиков: занятый порт
-    /// уронил бы ядро на старте, а фиксированный может оказаться занят.
-    static func freePort() -> Int? {
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return nil }
-        defer { close(fd) }
-        var addr = sockaddr_in()
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = 0
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
-        let bound = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        guard bound == 0 else { return nil }
-        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let named = withUnsafeMutablePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                getsockname(fd, $0, &len)
-            }
-        }
-        guard named == 0 else { return nil }
-        return Int(UInt16(bigEndian: addr.sin_port))
+    /// Сессия строго через HTTP-прокси ядра на заданном порту.
+    private static func makeSession(proxyPort: Int) -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.connectionProxyDictionary = [
+            kCFNetworkProxiesHTTPEnable as String: 1,
+            kCFNetworkProxiesHTTPProxy as String: "127.0.0.1",
+            kCFNetworkProxiesHTTPPort as String: proxyPort,
+        ]
+        config.timeoutIntervalForRequest = 2
+        return URLSession(configuration: config)
     }
 
     /// Перед запуском ядра: новая сессия считается с нуля.
+    /// `port` — HTTP-прокси ядра.
     func reset(port: Int?) {
         stop()
         self.port = port
+        session?.invalidateAndCancel()
+        session = port.map { Self.makeSession(proxyPort: $0) }
         uplink = 0
         downlink = 0
     }
@@ -86,7 +69,8 @@ final class SessionTraffic: ObservableObject {
     }
 
     private func poll(port: Int) async {
-        guard let url = URL(string: "http://127.0.0.1:\(port)/debug/vars"),
+        guard let session,
+              let url = URL(string: "http://\(XrayConfigBuilder.metricsHost)/debug/vars"),
               let (data, _) = try? await session.data(from: url),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let stats = root["stats"] as? [String: Any],
