@@ -34,7 +34,9 @@ trap 'rm -rf "$TMP"' EXIT
 fetch_arch() {
   local asset="$1" out="$2"
   echo "Скачиваю ${asset}..." >&2
-  curl -fsSL "https://github.com/${REPO}/releases/download/${TAG}/${asset}" -o "$TMP/${asset}" >&2
+  # Повторы: GitHub временами отдаёт 503/504 на загрузке ассетов.
+  curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 \
+    "https://github.com/${REPO}/releases/download/${TAG}/${asset}" -o "$TMP/${asset}" >&2
   unzip -o -q "$TMP/${asset}" -d "$TMP/${out}" >&2
   printf '%s' "$TMP/${out}/xray"
 }
