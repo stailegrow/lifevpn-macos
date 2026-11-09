@@ -160,6 +160,7 @@ struct SettingsTab: View {
             VStack(spacing: UI.s(14)) {
                 themeCard
                 behaviourCard
+                telegramCard
                 languageCard
                 aboutCard
             }
@@ -225,6 +226,50 @@ struct SettingsTab: View {
         .foregroundStyle(palette.textPrimary)
         .toggleStyle(HUDToggleStyle())
         .frame(maxHeight: .infinity)
+    }
+
+    /// Telegram для Mac ходит к своим серверам по голым IP и системный
+    /// прокси игнорирует: эти соединения идут мимо VPN, провайдер их режет,
+    /// и Telegram откатывается на медленные *.web.telegram.org — картинки и
+    /// видео почти не грузятся. Своим SOCKS-прокси Telegram пользоваться
+    /// умеет: ссылка tg://socks предлагает добавить наш 127.0.0.1 одним
+    /// нажатием, и тогда весь его трафик идёт через Life VPN.
+    private var telegramCard: some View {
+        Card(title: "Telegram") {
+            HStack(alignment: .center, spacing: UI.s(12)) {
+                Text(L.t("Telegram для Mac не пользуется системным прокси, поэтому без этой настройки картинки и видео грузятся плохо. Нажмите — Telegram предложит добавить прокси Life VPN (127.0.0.1:\(settings.socksPort)). Когда Life VPN выключен, отключите прокси в Telegram: Настройки → Данные и память → Прокси.",
+                         "Telegram for Mac ignores the system proxy, so without this setting pictures and videos load poorly. Click — Telegram will offer to add the Life VPN proxy (127.0.0.1:\(settings.socksPort)). When Life VPN is off, turn the proxy off in Telegram: Settings → Data and Storage → Proxy."))
+                    .font(Typography.body(10))
+                    .foregroundStyle(palette.textSecondary.opacity(0.8))
+                    .lineSpacing(UI.s(2))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button(L.t("Подключить", "Connect")) { Self.openTelegramProxy(port: settings.socksPort) }
+                    .buttonStyle(OutlineButtonStyle())
+            }
+        }
+    }
+
+    /// Ссылка, которую понимает Telegram: «добавить SOCKS5-прокси».
+    static func telegramProxyURL(port: Int) -> URL? {
+        var components = URLComponents()
+        components.scheme = "tg"
+        components.host = "socks"
+        components.queryItems = [
+            URLQueryItem(name: "server", value: "127.0.0.1"),
+            URLQueryItem(name: "port", value: String(port)),
+        ]
+        return components.url
+    }
+
+    private static func openTelegramProxy(port: Int) {
+        guard let url = telegramProxyURL(port: port) else { return }
+        if !NSWorkspace.shared.open(url) {
+            // Telegram не установлен — та же ссылка через t.me откроется в браузере.
+            if let web = URL(string: "https://t.me/socks?server=127.0.0.1&port=\(port)") {
+                NSWorkspace.shared.open(web)
+            }
+        }
     }
 
     private var aboutCard: some View {

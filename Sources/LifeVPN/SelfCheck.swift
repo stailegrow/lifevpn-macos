@@ -640,6 +640,11 @@ enum SelfCheck {
             try expect(entry.enabled && entry.authenticated == true, "authenticated")
         }
 
+        check("ссылка для Telegram добавляет SOCKS-прокси Life VPN на 127.0.0.1") {
+            let url = try unwrap(SettingsTab.telegramProxyURL(port: 10808), "url")
+            try equal(url.absoluteString, "tg://socks?server=127.0.0.1&port=10808", "ссылка tg://socks")
+        }
+
         check("загрузка обновления повторяется только при сбоях сети и 408/429/5xx") {
             for code in [408, 429, 500, 502, 503, 504] {
                 try expect(Updater.isRetryable(UpdateError("x", retryable: UpdateError.isRetryableStatus(code))), "код \(code) — повтор")
